@@ -44,8 +44,10 @@ Points are only ever written by `our_misses_send`; members can read the ledger b
 
 ## 3. Domain (Cloudflare)
 
-1. In the `aleemxnurul.love` zone add **CNAME** `missu` → `seaboiii.github.io`, **proxy off** (grey cloud) so GitHub can issue the certificate.
-2. **Settings → Pages → Custom domain:** `missu.aleemxnurul.love`, save, wait for the DNS check, then tick **Enforce HTTPS**. (Sites deployed by Actions ignore the `CNAME` file; it's kept in `public/` so the build check catches a wrong domain.)
+1. In the `aleemxnurul.love` zone add **CNAME** `missu` → `seaboiii.github.io`. Either proxy setting works:
+   - **Proxied (orange cloud)**, like the apex: Cloudflare serves HTTPS with its own certificate. This is how it's live. Turn on **SSL/TLS → Edge Certificates → Always Use HTTPS** so `http://` redirects.
+   - **DNS only (grey cloud)**: GitHub issues the certificate; tick **Enforce HTTPS** in Pages settings once it appears.
+2. **Settings → Pages → Custom domain:** `missu.aleemxnurul.love` (already set). Sites deployed by Actions ignore the `CNAME` file; it's kept in `public/` so the build check catches a wrong domain.
 
 ## 4. First check
 
