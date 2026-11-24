@@ -6,6 +6,8 @@ const browser = {
   // Locally, use the installed Edge instead of downloading Playwright's Chromium.
   channel: process.env.CI ? undefined : 'msedge',
   trace: 'retain-on-failure' as const,
+  // The service worker would answer some requests before Playwright's mocks could.
+  serviceWorkers: 'block' as const,
 }
 
 export default defineConfig({

@@ -65,6 +65,9 @@ export function History({ data, me, onBack }: { data: HistoryData; me: Player; o
                   <li>♥ {r.aleem_misses} vs {r.nurul_misses} misses</li>
                   {r.same_brains > 0 && <li>🧠 {r.same_brains} Same Brain{r.same_brains > 1 ? 's' : ''}</li>}
                   {r.longest_rally > 1 && <li>🏓 rally of {r.longest_rally}</li>}
+                  {r.aleem_proven + r.nurul_proven > 0 && <li>🔍 {r.aleem_proven} vs {r.nurul_proven} proven</li>}
+                  {r.aleem_bluffs + r.nurul_bluffs > 0 && <li>🤥 bluffs {r.aleem_bluffs}–{r.nurul_bluffs}</li>}
+                  {r.aleem_duels + r.nurul_duels > 0 && <li>⚔️ duels {r.aleem_duels}–{r.nurul_duels}</li>}
                 </ul>
               </li>
             )

@@ -334,3 +334,144 @@ button.banner:active { transform: translate(1px, 1px); }
 .tug-bar { height: 12px; border-radius: 999px; background: var(--nurul); border: 2px solid var(--line); overflow: hidden; }
 .tug-bar span { display: block; height: 100%; background: var(--aleem); border-right: 2px solid var(--line); }
 .week-stats { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--ink-soft); }
+
+/* Today: Prove It + Duel */
+.today h2 { font-size: 16px; margin-bottom: 8px; }
+.today-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.today-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  background: var(--bg); border: 2px solid var(--line); border-radius: 16px; box-shadow: 3px 3px 0 var(--line);
+  padding: 10px 12px; min-height: 92px;
+}
+.today-btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--line); }
+.today-btn:disabled { opacity: 0.55; box-shadow: none; cursor: default; }
+.today-icon { font-size: 24px; line-height: 1; }
+.today-name { font-weight: 700; font-size: 17px; }
+.today-btn small { color: var(--ink-soft); font-size: 12.5px; line-height: 1.3; }
+
+/* Prove It */
+.prove { display: flex; flex-direction: column; gap: 12px; }
+.prove-top h2 { font-size: 20px; text-align: center; }
+.prove-ask { font-size: 21px; font-weight: 700; line-height: 1.2; }
+.ladder { display: flex; flex-direction: column-reverse; gap: 7px; }
+.rung {
+  display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 8px; text-align: left;
+  background: var(--bg); border: 2px solid var(--line); border-radius: 14px; padding: 9px 12px;
+}
+.rung-icon { font-size: 22px; }
+.rung-name { font-weight: 600; }
+.rung-need { font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; }
+.rung.picked { background: var(--heart-tint); box-shadow: 3px 3px 0 var(--line); transform: translate(-1px, -1px); }
+.rung.picked .rung-need { color: var(--ink); }
+.prove-headline { font-size: 20px; font-weight: 700; text-align: center; }
+.prove-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.prove-card {
+  position: relative; display: flex; flex-direction: column; gap: 4px; min-height: 128px;
+  border: 2px solid var(--line); border-radius: 16px; padding: 10px; background: var(--bg); overflow: hidden;
+}
+.prove-who { font-size: 13px; color: var(--ink-soft); font-weight: 600; }
+.prove-claim { font-weight: 700; line-height: 1.25; }
+.prove-score { font-size: 13px; color: var(--ink-soft); }
+.prove-card.waiting, .prove-card.hidden { border-style: dashed; }
+.stamp {
+  margin-top: auto; align-self: flex-start; font-weight: 800; font-size: 13px; letter-spacing: 0.04em;
+  border: 2.5px solid currentColor; border-radius: 8px; padding: 2px 7px; transform: rotate(-6deg);
+  animation: stamp 0.35s cubic-bezier(.3, 1.6, .5, 1);
+}
+.prove-card.passed .stamp { color: var(--good); }
+.prove-card.bluff .stamp { color: var(--heart); }
+.prove-card.bluff { background: repeating-linear-gradient(-45deg, var(--bg), var(--bg) 10px, var(--heart-tint) 10px, var(--heart-tint) 20px); }
+@keyframes stamp { from { transform: rotate(-6deg) scale(2.2); opacity: 0; } }
+.prove-last h3 { font-size: 15px; color: var(--ink-soft); }
+.countdown { font-size: 110px; font-weight: 700; text-align: center; color: var(--heart); line-height: 1; padding: 40px 0; animation: pop 0.6s cubic-bezier(.3, 1.7, .5, 1); }
+
+.catch { display: flex; flex-direction: column; gap: 8px; }
+.catch-hud { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; font-weight: 600; padding: 0 2px; }
+.catch-score b { font-size: 30px; }
+.catch-score.reached { color: var(--good); }
+.catch-bar { height: 10px; border: 2px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--paper); }
+.catch-bar span { display: block; height: 100%; background: var(--heart); transition: width 0.15s; }
+.catch-bar span.reached { background: var(--good); }
+.catch-canvas { width: 100%; display: block; border: 2.5px solid var(--line); border-radius: 18px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.catch-legend { text-align: center; font-size: 13px; color: var(--ink-soft); }
+
+/* Duel */
+.duel { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 16px; background: rgb(20 10 20 / 0.45); backdrop-filter: blur(3px); animation: fade 0.2s ease-out; }
+.duel-card {
+  width: min(100%, 360px); background: var(--paper); border: 3px solid var(--line); border-radius: 24px;
+  box-shadow: 6px 6px 0 var(--line); padding: 18px; display: flex; flex-direction: column; gap: 12px; text-align: center;
+  animation: pop 0.4s cubic-bezier(.3, 1.6, .5, 1);
+}
+.duel-card.wide { width: min(100%, 420px); }
+.duel-title { font-size: 22px; font-weight: 700; }
+.duel-scores { display: flex; justify-content: space-between; font-weight: 600; }
+.duel-scores b { font-size: 30px; font-variant-numeric: tabular-nums; }
+.duel-scores .a b { color: var(--aleem); }
+.duel-scores .n b { color: var(--nurul); }
+.duel-time { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.duel .countdown { padding: 10px 0; font-size: 90px; }
+.tap-button {
+  height: 180px; border-radius: 28px; border: 3px solid var(--line); background: var(--heart); color: #fff;
+  font-size: 44px; font-weight: 800; letter-spacing: 0.05em; box-shadow: 6px 6px 0 var(--line);
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.tap-button:active { transform: translate(3px, 3px) scale(0.98); box-shadow: 3px 3px 0 var(--line); }
+.duel-result { font-size: 22px; font-weight: 700; }
+.pill.ghost { background: var(--paper); color: var(--ink); }
+
+/* The all-time counter */
+.counter { display: flex; flex-direction: column; align-items: center; gap: 1px; margin-top: 8px; padding-top: 8px; border-top: 1.5px dashed var(--track); text-align: center; }
+.counter-total { font-size: 15px; }
+.counter-total b { font-size: 20px; color: var(--heart); font-variant-numeric: tabular-nums; }
+.counter-split { font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
+/* Menu sheet */
+.icon[aria-label="Menu"] { font-size: 24px; line-height: 1; font-weight: 700; }
+.sheet-backdrop { position: fixed; inset: 0; z-index: 44; background: rgb(20 10 20 / 0.35); display: flex; align-items: flex-end; justify-content: center; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); animation: fade 0.15s ease-out; }
+.sheet { width: min(100%, 420px); display: flex; flex-direction: column; gap: 10px; animation: drop 0.25s ease-out reverse; }
+.sheet-who { text-align: center; }
+.sheet-row { text-align: left; background: var(--bg); border: 2px solid var(--line); border-radius: 14px; padding: 11px 14px; font-weight: 600; }
+.sheet-row.danger { color: var(--heart); }
+.sheet .install { box-shadow: none; border-width: 2px; }
+
+/* Install */
+.install { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.install-title { font-weight: 700; font-size: 16px; }
+.install-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.install-signin { margin-top: 14px; width: 100%; }
+.install .link { align-self: flex-start; padding-left: 0; }
+
+/* VS picker */
+.vs-game { display: flex; align-items: center; gap: 12px; text-align: left; background: var(--bg); border: 2px solid var(--line); border-radius: 16px; box-shadow: 3px 3px 0 var(--line); padding: 12px; }
+.vs-game:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--line); }
+.vs-icon { font-size: 30px; }
+.vs-text { display: flex; flex-direction: column; gap: 2px; }
+.vs-text b { font-size: 17px; }
+.vs-text small { color: var(--ink-soft); font-size: 13px; line-height: 1.3; }
+
+/* Pour-off: the water sort race (dark glass, like the original game) */
+.duel-card.race { width: min(100%, 440px); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.race-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.race-them { font-size: 14px; color: var(--nurul); }
+.race-alert { background: var(--gold); border: 2px solid var(--line); border-radius: 12px; padding: 6px 10px; font-size: 14px; }
+.race-alert .link { padding: 0; font-size: 14px; color: var(--ink); }
+.race-scores { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pour { display: flex; flex-direction: column; gap: 10px; }
+.pour-board {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 4px; padding: 14px 8px 8px;
+  background: radial-gradient(120% 90% at 50% 0%, #26305a 0%, #141a33 60%, #0e1226 100%);
+  border: 2.5px solid var(--line); border-radius: 20px;
+}
+.pour-bottle {
+  background: none; border: none; padding: 0 2px; border-radius: 12px;
+  transition: transform 0.15s cubic-bezier(.3, 1.5, .5, 1);
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.pour-bottle .bottle-svg { width: 100%; max-width: 74px; height: auto; display: block; margin: 0 auto; }
+.pour-bottle.selected { transform: translateY(-16px); }
+.pour-bottle.selected .bottle-svg { filter: drop-shadow(0 0 8px rgb(255 255 255 / 0.55)); }
+.pour-bottle.invalid { animation: shake 0.08s linear 4; }
+.pour-bottle:focus-visible { outline: 3px solid #a9d2ff; outline-offset: 2px; }
+.bottle-svg.complete { filter: drop-shadow(0 0 6px rgb(165 233 208 / 0.6)); }
+.pour-tools { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.small-pill { padding: 7px 14px; font-size: 15px; }

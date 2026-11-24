@@ -46,5 +46,12 @@ export const sfx = {
   receive() { tone(784, 0, 0.18, 'sine', 0.1); tone(1046, 0.12, 0.28, 'sine', 0.1); buzz([20, 40, 20]) },
   sameBrain() { [523, 659, 784, 1046].forEach((f, i) => tone(f, i * 0.09, 0.4, 'triangle', 0.09)); buzz([40, 30, 40, 30, 80]) },
   denied() { tone(220, 0, 0.16, 'square', 0.04, 160); buzz(60) },
+  pop(points: number) { tone(points > 1 ? 1175 : 880, 0, 0.09, 'triangle', 0.07, points > 1 ? 1760 : 1100) },
+  oops() { tone(140, 0, 0.22, 'sawtooth', 0.05, 90); buzz(50) },
+  tick() { tone(660, 0, 0.08, 'square', 0.04) },
+  go() { tone(990, 0, 0.25, 'triangle', 0.08, 1320) },
+  win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, i * 0.08, 0.35, 'triangle', 0.08)); buzz([30, 40, 60]) },
+  lose() { [392, 370, 349, 262].forEach((f, i) => tone(f, i * 0.22, 0.3, 'sawtooth', 0.04)); buzz(120) },
+  tap() { tone(520 + Math.random() * 80, 0, 0.04, 'square', 0.025) },
   unlock() { audio() },
 }

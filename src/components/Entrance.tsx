@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import type { Player } from '../game/rules'
 import { sfx } from '../lib/sound'
+import { InstallCard } from './Install'
 
-export function SignIn({ onSignIn }: { onSignIn(email: string, password: string): Promise<void> }) {
-  const [email, setEmail] = useState('')
+export function SignIn({ onSignIn, rememberedEmail = '' }: { onSignIn(email: string, password: string): Promise<void>; rememberedEmail?: string }) {
+  const [email, setEmail] = useState(rememberedEmail)
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -23,12 +24,13 @@ export function SignIn({ onSignIn }: { onSignIn(email: string, password: string)
       <h1 className="wordmark big">miss<span>u</span></h1>
       <p className="tagline">Who misses more? Only one way to find out.</p>
       <form className="card stack" onSubmit={submit}>
-        <label>Email<input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-        <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+        <label>Email<input type="email" name="username" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+        <label>Password<input type="password" name="password" autoComplete="current-password" required autoFocus={Boolean(rememberedEmail)} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
         {error && <p className="error" role="alert">{error}</p>}
         <button className="pill" disabled={busy}>{busy ? 'checking…' : 'Grab the rope'}</button>
-        <p className="muted small">Only two people can come in. You know who you are.</p>
+        <p className="muted small">Only two people can come in. Sign in once on this phone and missu remembers you; your phone’s password manager can fill this in with Face ID or your fingerprint.</p>
       </form>
+      <InstallCard context="signin" />
     </main>
   )
 }

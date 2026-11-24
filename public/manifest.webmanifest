@@ -2,7 +2,7 @@
   "id": "/",
   "name": "missu · who misses more?",
   "short_name": "missu",
-  "description": "A tug of war for two. Who misses more?",
+  "description": "Who misses more? A counter of how much we miss each other, with games.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,10 +10,56 @@
   "background_color": "#fff4e8",
   "theme_color": "#fff4e8",
   "lang": "en",
-  "categories": ["games", "lifestyle"],
+  "categories": [
+    "games",
+    "lifestyle"
+  ],
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "display_override": [
+    "standalone"
+  ],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Prove It",
+      "short_name": "Prove It",
+      "url": "/#prove",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "History",
+      "short_name": "History",
+      "url": "/#history",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
   ]
 }

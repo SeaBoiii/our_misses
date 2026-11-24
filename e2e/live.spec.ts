@@ -15,6 +15,8 @@ function json(route: Route, body: unknown, status = 200) {
 
 async function mockProject(page: Page, opts: { member?: boolean; hearts?: number; refuse?: boolean } = {}) {
   const sent: unknown[] = []
+  const proveCalls: { fn: string; body: unknown }[] = []
+  let mine: Record<string, unknown> | null = null
   let hearts = opts.hearts ?? 3
   const now = () => new Date().toISOString()
   const heartsOf = () => ({ hearts, next_at: hearts < 3 ? new Date(Date.now() + 1_800_000).toISOString() : null })
@@ -30,10 +32,25 @@ async function mockProject(page: Page, opts: { member?: boolean; hearts?: number
     if (opts.member === false && path.startsWith('/rest/')) return json(route, { code: '42501', message: 'not a member', details: null, hint: null }, 403)
     if (path === '/rest/v1/rpc/our_misses_status') return json(route, status())
     if (path === '/rest/v1/rpc/our_misses_weeks') return json(route, [
-      { week_start: '2026-11-16', aleem: 7, nurul: 9, aleem_misses: 4, nurul_misses: 5, same_brains: 1, longest_rally: 3 },
-      { week_start: '2026-11-09', aleem: 12, nurul: 5, aleem_misses: 6, nurul_misses: 3, same_brains: 0, longest_rally: 2 },
+      { week_start: '2026-11-16', aleem: 7, nurul: 9, aleem_misses: 4, nurul_misses: 5, same_brains: 1, longest_rally: 3, aleem_proven: 2, nurul_proven: 3, aleem_bluffs: 1, nurul_bluffs: 0, aleem_duels: 1, nurul_duels: 0 },
+      { week_start: '2026-11-09', aleem: 12, nurul: 5, aleem_misses: 6, nurul_misses: 3, same_brains: 0, longest_rally: 2, aleem_proven: 0, nurul_proven: 0, aleem_bluffs: 0, nurul_bluffs: 0, aleem_duels: 0, nurul_duels: 0 },
     ])
     if (path === '/rest/v1/our_misses_events') return json(route, [])
+    const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10)
+    const proveStatus = () => ({ now: now(), day: today, today: { day: today, revealed: false, Aleem: mine, Nurul: null }, last: null })
+    if (path === '/rest/v1/rpc/our_misses_prove_today') return json(route, proveStatus())
+    if (path === '/rest/v1/rpc/our_misses_prove_start') {
+      const body = route.request().postDataJSON()
+      proveCalls.push({ fn: 'start', body })
+      mine = { finished: false, level: body.p_level, target: 6, score: null, passed: null, started_at: now() }
+      return json(route, { level: body.p_level, target: 6, started_at: now() })
+    }
+    if (path === '/rest/v1/rpc/our_misses_prove_finish') {
+      const body = route.request().postDataJSON()
+      proveCalls.push({ fn: 'finish', body })
+      mine = { ...mine, finished: true, score: body.p_score, passed: body.p_score >= 6 }
+      return json(route, proveStatus())
+    }
     if (path === '/rest/v1/rpc/our_misses_send') {
       const body = route.request().postDataJSON()
       sent.push(body)
@@ -44,7 +61,7 @@ async function mockProject(page: Page, opts: { member?: boolean; hearts?: number
     }
     return route.fulfill({ status: 404 })
   })
-  return sent
+  return Object.assign(sent, { proveCalls })
 }
 
 async function hold(page: Page, ms: number) {
@@ -72,10 +89,12 @@ test('signs in, sends a miss through the RPC and shows last season', async ({ pa
   await expect(page.locator('.score-nurul')).toContainText('🏆1')
   await hold(page, 1900)
   await expect(page.getByTestId('score-Aleem')).toHaveText('3')
-  expect(sent).toEqual([{ p_charge: 3, p_seen_id: 0 }])
+  expect([...sent]).toEqual([{ p_charge: 3, p_seen_id: 0 }])
   await expect(page.getByTestId('hearts')).toHaveAccessibleName('You have 0 of 3 hearts')
-  await page.getByRole('button', { name: 'sign out' }).click()
+  await page.getByRole('button', { name: 'Menu' }).click()
+  await page.getByRole('button', { name: /Sign out of this phone/ }).click()
   await expect(page.getByRole('button', { name: 'Grab the rope' })).toBeVisible()
+  await expect(page.getByLabel('Email')).toHaveValue('aleem@example.test')
 })
 
 test('the database refusing a send shows a friendly toast', async ({ page }) => {
@@ -108,4 +127,44 @@ test('the last-week banner opens the history board from the database', async ({ 
   await expect(page.getByTestId('trophies-Nurul')).toHaveText('🏆 1')
   await page.getByRole('button', { name: '← back to the rope' }).click()
   await expect(page.locator('.rope')).toBeVisible()
+})
+
+test('Prove It goes through the database: claim locked in first, then the score', async ({ page }) => {
+  test.setTimeout(90_000)
+  const mock = await mockProject(page)
+  await signIn(page)
+  await page.getByTestId('open-prove').click()
+  await page.getByRole('radio', { name: /a kaya toast crumb/ }).click()
+  await page.getByRole('button', { name: /^Lock in/ }).click()
+  await expect(page.getByTestId('catch-hud')).toBeVisible()
+  expect(mock.proveCalls).toEqual([{ fn: 'start', body: { p_level: 1 } }])
+  await expect(page.getByTestId('prove-mine')).toBeVisible({ timeout: 40_000 })
+  expect(mock.proveCalls[1]).toMatchObject({ fn: 'finish', body: { p_score: expect.any(Number) } })
+  await expect(page.getByTestId('prove-mine')).toContainText(/PROVEN|BLUFF/)
+})
+
+test('the history board shows Prove It and Duel stats', async ({ page }) => {
+  await mockProject(page)
+  await signIn(page)
+  await page.getByRole('button', { name: 'History' }).click()
+  const week = page.getByTestId('week').nth(1)
+  await expect(week).toContainText('🔍 2 vs 3 proven')
+  await expect(week).toContainText('🤥 bluffs 1–0')
+  await expect(week).toContainText('⚔️ duels 1–0')
+})
+
+test('once signed in, reopening the app goes straight to the rope', async ({ page }) => {
+  await mockProject(page)
+  await signIn(page)
+  await expect(page.getByTestId('score-Aleem')).toBeVisible()
+  await page.reload()
+  await expect(page.getByTestId('score-Aleem')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Grab the rope' })).toHaveCount(0)
+})
+
+test('the sign-in screen explains how to install it on an iPhone first', async ({ page }) => {
+  await mockProject(page)
+  await page.goto('/')
+  await expect(page.getByTestId('install')).toContainText('Add to Home Screen')
+  await expect(page.getByTestId('install')).toContainText('sign in there once')
 })

@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { Backend } from './backend'
-import { NoHeartsError, type MissEvent, type Player, type SendResult, type Status, type WeekTotal } from '../game/rules'
+import type { RealtimeChannel } from '@supabase/supabase-js'
+import type { Backend, Signal } from './backend'
+import { NoHeartsError, type Duel, type MissEvent, type Player, type ProveStart, type ProveStatus, type SendResult, type Status, type WeekTotal } from '../game/rules'
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined
@@ -28,6 +29,12 @@ export async function liveBackend(): Promise<Backend> {
   const first = await db.rpc('our_misses_status')
   if (first.error) fail(first.error)
   const me = (first.data as Status).me
+  let room: RealtimeChannel | null = null
+  const call = async <T,>(fn: string, args?: Record<string, unknown>) => {
+    const { data, error } = await db.rpc(fn, args)
+    if (error) fail(error)
+    return data as T
+  }
 
   return {
     kind: 'live',
@@ -52,12 +59,23 @@ export async function liveBackend(): Promise<Backend> {
       if (error) fail(error)
       return data as SendResult
     },
-    subscribe(onEvent, onPresence) {
+    proveToday: () => call<ProveStatus>('our_misses_prove_today'),
+    proveStart: (level) => call<ProveStart>('our_misses_prove_start', { p_level: level }),
+    proveFinish: (score) => call<ProveStatus>('our_misses_prove_finish', { p_score: score }),
+    duelStart: (game) => call<Duel>('our_misses_duel_start', { p_game: game }),
+    duelFinish: (id, value, solved = false) => call<Duel>('our_misses_duel_finish', { p_id: id, p_score: value, p_solved: solved }),
+    duelGet: (id) => call<Duel>('our_misses_duel_get', { p_id: id }),
+    signal(s) {
+      void room?.send({ type: 'broadcast', event: 'signal', payload: s })
+    },
+    subscribe(onEvent, onPresence, onSignal) {
       let closed = false
       const channel = db.channel('our_misses:room', { config: { private: true, presence: { key: me } } })
       channel
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'our_misses_events' }, (payload) => onEvent(payload.new as MissEvent))
         .on('presence', { event: 'sync' }, () => onPresence(Object.keys(channel.presenceState()) as Player[]))
+        .on('broadcast', { event: 'signal' }, ({ payload }) => onSignal(payload as Signal))
+      room = channel
       const track = () => {
         if (document.visibilityState === 'visible') void channel.track({ since: Date.now() })
         else void channel.untrack()
@@ -69,6 +87,7 @@ export async function liveBackend(): Promise<Backend> {
       document.addEventListener('visibilitychange', track)
       return () => {
         closed = true
+        room = null
         document.removeEventListener('visibilitychange', track)
         void db.removeChannel(channel)
       }

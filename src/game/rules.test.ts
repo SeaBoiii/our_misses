@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
-  chargeFor, history, weekTotalsFrom, heartsAt, liveHearts, NoHeartsError, rallyFor, rallyState, ropePosition, sameBrainPartner,
+  chargeFor, dayKey, emptyWeek, history, weekTotalsFrom, heartsAt, liveHearts, NoHeartsError, rallyFor, rallyState, ropePosition, sameBrainPartner,
   seasons, spendHeart, totals, weekKey, weekStartMs, type MissEvent, type Player,
 } from './rules'
 
 const MIN = 60_000
 const T0 = Date.parse('2026-11-22T15:50:00Z') // Sunday 23:50 in Singapore
 let nextId = 1
-const wk = (week_start: string, aleem: number, nurul: number) => ({ week_start, aleem, nurul, aleem_misses: 0, nurul_misses: 0, same_brains: 0, longest_rally: 0 })
+const wk = (week_start: string, aleem: number, nurul: number) => ({ ...emptyWeek(week_start), aleem, nurul })
 const miss = (player: Player, t: number, charge = 1, rally_length = 1, rally_bonus = 0): MissEvent => ({
   id: nextId++, player, kind: 'miss', charge, rally_length, rally_bonus, points: charge + rally_bonus, ref_id: null, created_at: new Date(t).toISOString(),
 })
@@ -72,7 +72,9 @@ describe('Same Brain', () => {
 })
 
 describe('seasons', () => {
-  it('start on Monday 00:00 in Singapore', () => {
+  it('days and weeks follow Singapore time', () => {
+    expect(dayKey(T0)).toBe('2026-11-22')
+    expect(dayKey(T0 + 10 * MIN)).toBe('2026-11-23')
     expect(weekKey(T0)).toBe('2026-11-16')
     expect(weekKey(T0 + 10 * MIN)).toBe('2026-11-23')
     expect(weekStartMs(T0 + 10 * MIN)).toBe(T0 + 10 * MIN)
@@ -109,9 +111,11 @@ describe('history board', () => {
     ]
     const pair = (p: Player, ref: number): MissEvent => ({ ...miss(p, T0 + 20.5 * 60_000), kind: 'same_brain', charge: null, rally_length: null, points: 3, ref_id: ref })
     events.push(pair('Nurul', events[3].id), pair('Aleem', events[2].id))
+    const bonus = (kind: 'prove_it' | 'duel', p: Player, points: number): MissEvent => ({ ...miss(p, T0 + 30 * 60_000), kind, charge: null, rally_length: null, points })
+    events.push(bonus('prove_it', 'Aleem', 4), bonus('duel', 'Nurul', 5))
     expect(weekTotalsFrom(events)).toEqual([
-      { week_start: '2026-11-23', aleem: 1 + 3, nurul: 2 + 3, aleem_misses: 1, nurul_misses: 1, same_brains: 1, longest_rally: 2 },
-      { week_start: '2026-11-16', aleem: 3, nurul: 3, aleem_misses: 1, nurul_misses: 1, same_brains: 0, longest_rally: 2 },
+      { ...emptyWeek('2026-11-23'), aleem: 1 + 3 + 4, nurul: 2 + 3 + 5, aleem_misses: 1, nurul_misses: 1, same_brains: 1, longest_rally: 2, aleem_proven: 1, nurul_duels: 1 },
+      { ...emptyWeek('2026-11-16'), aleem: 3, nurul: 3, aleem_misses: 1, nurul_misses: 1, same_brains: 0, longest_rally: 2 },
     ])
   })
 
@@ -126,6 +130,8 @@ describe('history board', () => {
       ['2026-10-26', 'tie', false],
     ])
     expect(h.rows[0].aleem).toBe(10)
+    const withBluffs = history([{ ...wk('2026-11-23', 1, 0), nurul_bluffs: 2 }], '2026-11-23', wk('2026-11-23', 4, 4))
+    expect([withBluffs.rows[0].aleem, withBluffs.rows[0].nurul_bluffs]).toEqual([4, 2])
     expect(h.trophies).toEqual({ Aleem: 1, Nurul: 2 })
     expect(h.streak).toEqual({ player: 'Nurul', weeks: 2 })
     expect(h.allTime).toEqual({ Aleem: 10 + 3 + 2 + 8 + 4, Nurul: 12 + 9 + 5 + 1 + 4 })

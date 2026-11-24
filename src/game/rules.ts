@@ -8,7 +8,7 @@ export const partnerOf = (p: Player): Player => (p === 'Aleem' ? 'Nurul' : 'Alee
 export interface MissEvent {
   id: number
   player: Player
-  kind: 'miss' | 'same_brain'
+  kind: 'miss' | 'same_brain' | 'prove_it' | 'duel'
   charge: number | null
   rally_length: number | null
   rally_bonus: number
@@ -27,7 +27,61 @@ export interface WeekTotal {
   nurul_misses: number
   same_brains: number
   longest_rally: number
+  aleem_proven: number
+  nurul_proven: number
+  aleem_bluffs: number
+  nurul_bluffs: number
+  aleem_duels: number
+  nurul_duels: number
 }
+
+/** One player's Prove It for a day. The partner's claim is hidden (only `finished`) until the reveal. */
+export interface ProveEntry { finished: boolean; level?: number; target?: number; score?: number | null; passed?: boolean | null; started_at?: string }
+export interface ProveDay { day: string; revealed: boolean; Aleem: ProveEntry | null; Nurul: ProveEntry | null }
+export interface ProveStatus { now: string; day: string; today: ProveDay; last: ProveDay | null }
+export interface ProveStart { level: number; target: number; started_at: string }
+/** VS games. tug: 15 s of tapping. pour: a water sort race on one shared puzzle. */
+export type VsGame = 'tug' | 'pour'
+export interface Duel {
+  id: number
+  game: VsGame
+  seed: number
+  started_by: Player
+  starts_at: string
+  /** tug: taps. pour: 1,000,000 − solve time in ms, or the bottles completed if unsolved. */
+  aleem_score: number | null
+  nurul_score: number | null
+  winner: Player | 'tie' | null
+  points: number
+  settled: boolean
+  now: string
+}
+export const DUEL_COUNTDOWN_MS = 4_000
+export const VS_LENGTH_MS: Record<VsGame, number> = { tug: 15_000, pour: 180_000 }
+export const DUEL_POINTS = 5
+export const SOLVED_BASE = 1_000_000
+/** Mirrors the database: how a finished VS game is scored. */
+export function vsScore(game: VsGame, value: number, solved: boolean, elapsedMs: number) {
+  if (game === 'tug') return Math.min(300, Math.max(0, value))
+  return solved ? SOLVED_BASE - Math.min(SOLVED_BASE - 1, Math.floor(elapsedMs)) : Math.min(20, Math.max(0, value))
+}
+/** "48 taps", "solved in 1:02.4", "3 bottles". */
+export function describeVsScore(game: VsGame, score: number | null) {
+  if (score === null) return 'no score'
+  if (game === 'tug') return `${score} tap${score === 1 ? '' : 's'}`
+  if (score >= SOLVED_BASE / 2) {
+    const ms = SOLVED_BASE - score
+    const m = Math.floor(ms / 60_000)
+    const s = ((ms % 60_000) / 1000).toFixed(1)
+    return `solved in ${m > 0 ? `${m}:${s.padStart(4, '0')}` : `${s}s`}`
+  }
+  return `${score} bottle${score === 1 ? '' : 's'}`
+}
+
+export const emptyWeek = (week_start: string): WeekTotal => ({
+  week_start, aleem: 0, nurul: 0, aleem_misses: 0, nurul_misses: 0, same_brains: 0, longest_rally: 0,
+  aleem_proven: 0, nurul_proven: 0, aleem_bluffs: 0, nurul_bluffs: 0, aleem_duels: 0, nurul_duels: 0,
+})
 
 export const HEART_CAP = 3
 export const REFILL_MS = 30 * 60_000
@@ -102,6 +156,10 @@ export function weekStartMs(t: number) {
   const midnight = Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate())
   return midnight - mondayIndex * 86_400_000 - SGT_OFFSET_MS
 }
+/** The Singapore calendar day of t, YYYY-MM-DD. */
+export function dayKey(t: number) {
+  return new Date(t + SGT_OFFSET_MS).toISOString().slice(0, 10)
+}
 export function weekKey(t: number) {
   return new Date(weekStartMs(t) + SGT_OFFSET_MS).toISOString().slice(0, 10)
 }
@@ -168,14 +226,20 @@ export function weekTotalsFrom(events: readonly MissEvent[]): WeekTotal[] {
   const byWeek = new Map<string, WeekTotal>()
   for (const e of events) {
     const k = weekKey(Date.parse(e.created_at))
-    const w = byWeek.get(k) ?? { week_start: k, aleem: 0, nurul: 0, aleem_misses: 0, nurul_misses: 0, same_brains: 0, longest_rally: 0 }
+    const w = byWeek.get(k) ?? emptyWeek(k)
     if (e.player === 'Aleem') w.aleem += e.points
     else w.nurul += e.points
     if (e.kind === 'miss') {
       if (e.player === 'Aleem') w.aleem_misses++
       else w.nurul_misses++
       w.longest_rally = Math.max(w.longest_rally, e.rally_length ?? 0)
-    } else if (e.player === 'Aleem') w.same_brains++ // one of the pair's two rows
+    } else if (e.kind === 'same_brain') {
+      if (e.player === 'Aleem') w.same_brains++ // one of the pair's two rows
+    } else if (e.kind === 'prove_it') {
+      if (e.player === 'Aleem') w.aleem_proven++
+      else w.nurul_proven++
+    } else if (e.player === 'Aleem') w.aleem_duels++
+    else w.nurul_duels++
     byWeek.set(k, w)
   }
   return [...byWeek.values()].sort((a, b) => b.week_start.localeCompare(a.week_start))
@@ -192,11 +256,10 @@ export interface History {
 /** The history board: every season newest first, with the live week swapped in from events. */
 export function history(weeks: readonly WeekTotal[], currentWeek: string, liveWeek?: WeekTotal): History {
   const merged = weeks.filter((w) => w.week_start !== currentWeek)
-  if (liveWeek) merged.push(liveWeek)
-  else {
-    const stored = weeks.find((w) => w.week_start === currentWeek)
-    if (stored) merged.push(stored)
-  }
+  const stored = weeks.find((w) => w.week_start === currentWeek)
+  // Bluffs aren't in the ledger, so the live week keeps the database's count of them.
+  if (liveWeek) merged.push({ ...liveWeek, aleem_bluffs: stored?.aleem_bluffs ?? 0, nurul_bluffs: stored?.nurul_bluffs ?? 0 })
+  else if (stored) merged.push(stored)
   merged.sort((a, b) => b.week_start.localeCompare(a.week_start))
   const rows: HistoryRow[] = merged.map((w) => ({
     ...w,
