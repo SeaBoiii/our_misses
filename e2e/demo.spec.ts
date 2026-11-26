@@ -9,7 +9,7 @@ async function hold(page: Page, ms: number) {
 }
 
 test('a held heart scores 3, rallies, bursts and runs out', async ({ page }) => {
-  await page.goto('/?quiet')
+  await page.goto('/?quiet&allgames')
   await page.getByRole('button', { name: 'Aleem' }).click()
   await expect(page.getByTestId('score-Aleem')).toHaveText('0')
   await expect(page.getByTestId('hearts')).toHaveAccessibleName('You have 3 of 3 hearts')
@@ -33,7 +33,7 @@ test('a held heart scores 3, rallies, bursts and runs out', async ({ page }) => 
 })
 
 test('missing each other at the same moment is a Same Brain', async ({ page }) => {
-  await page.goto('/?samebrain')
+  await page.goto('/?samebrain&allgames')
   await page.getByRole('button', { name: 'Nurul' }).click()
   await expect(page.locator('.presence.on')).toBeVisible()
   await hold(page, 1200)
@@ -42,14 +42,14 @@ test('missing each other at the same moment is a Same Brain', async ({ page }) =
 })
 
 test('fits a phone with no sideways scroll', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?allgames')
   await page.getByRole('button', { name: 'Aleem' }).click()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })
 
 test('the history board keeps every week and returns to the rope', async ({ page }) => {
-  await page.goto('/?quiet')
+  await page.goto('/?quiet&allgames')
   await page.getByRole('button', { name: 'Aleem' }).click()
   await hold(page, 100)
   await expect(page.getByTestId('score-Aleem')).toHaveText('1')
@@ -66,7 +66,7 @@ test('the history board keeps every week and returns to the rope', async ({ page
 
 test('Prove It: claim, play the 20-second round, and get stamped', async ({ page }) => {
   test.setTimeout(90_000)
-  await page.goto('/?quiet')
+  await page.goto('/?quiet&allgames')
   await page.getByRole('button', { name: 'Aleem' }).click()
   await page.getByTestId('open-prove').click()
   await expect(page.getByText('How much did you miss Nurul today?')).toBeVisible()
@@ -88,7 +88,7 @@ test('Prove It: claim, play the 20-second round, and get stamped', async ({ page
 
 test('Duel: challenge, tap, win the day’s +5', async ({ page }) => {
   test.setTimeout(60_000)
-  await page.goto('/?quiet')
+  await page.goto('/?quiet&allgames')
   await page.getByRole('button', { name: 'Aleem' }).click()
   await expect(page.locator('.presence.on')).toBeVisible()
   await page.getByTestId('open-duel').click()
@@ -108,12 +108,12 @@ test('Duel: challenge, tap, win the day’s +5', async ({ page }) => {
   await page.getByRole('button', { name: 'Back to the rope' }).click()
   await expect(page.getByTestId('score-Aleem')).toHaveText('5')
   await expect(page.locator('.feed li').first()).toContainText('⚔️ You won VS +5')
-  await expect(page.getByTestId('open-duel')).toContainText('today’s +5 misses went to you')
+  await expect(page.getByTestId('open-duel')).toContainText('today’s +5 went to you')
 })
 
 test('Duel: answering a challenge', async ({ page }) => {
   test.setTimeout(60_000)
-  await page.goto('/?quiet&duelme')
+  await page.goto('/?quiet&duelme&allgames')
   await page.getByRole('button', { name: 'Nurul' }).click()
   await expect(page.getByRole('dialog')).toContainText('Aleem challenges you!')
   await page.getByRole('button', { name: 'I’m in' }).click()
@@ -134,7 +134,7 @@ async function playRace(page: import('@playwright/test').Page) {
 
 test('Pour-off: sort every colour first and win the race', async ({ page }) => {
   test.setTimeout(90_000)
-  await page.goto('/?quiet')
+  await page.goto('/?quiet&allgames')
   await page.getByRole('button', { name: 'Aleem' }).click()
   await expect(page.locator('.presence.on')).toBeVisible()
   await page.getByTestId('open-duel').click()
@@ -150,7 +150,7 @@ test('Pour-off: sort every colour first and win the race', async ({ page }) => {
 
 test('Pour-off: when she solves first, your round ends and she wins', async ({ page }) => {
   test.setTimeout(60_000)
-  await page.goto('/?quiet&pourme&fastbot')
+  await page.goto('/?quiet&pourme&fastbot&allgames')
   await page.getByRole('button', { name: 'Nurul' }).click()
   await expect(page.getByRole('dialog')).toContainText('Aleem challenges you!')
   await expect(page.getByRole('dialog')).toContainText('Pour-off')
@@ -161,7 +161,7 @@ test('Pour-off: when she solves first, your round ends and she wins', async ({ p
 })
 
 test('the menu keeps sign-out out of the way, and the counter is front and centre', async ({ page }) => {
-  await page.goto('/?quiet')
+  await page.goto('/?quiet&allgames')
   await page.getByRole('button', { name: 'Aleem' }).click()
   await expect(page.getByTestId('counter')).toContainText('misses between you, all time')
   await expect(page.getByRole('button', { name: /switch|sign out/i })).toHaveCount(0)

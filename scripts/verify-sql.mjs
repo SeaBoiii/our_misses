@@ -109,10 +109,38 @@ try {
   await fails('select public.our_misses_send(0, 0)', [], '22023')
   checks += 3
 
+  // ---- The daily lineup: only today's games can be started ---------------------------
+  const lineup = (await db.query('select public.our_misses_lineup() as r')).rows[0].r
+  assert.deepEqual(lineup.today, { day: '2026-11-22', daily: 'tot', play: ['tug', 'mrt', 'quiz'] })
+  assert.deepEqual(lineup.tomorrow, { day: '2026-11-23', daily: 'prove', play: ['tug', 'quiz', 'chapteh'] })
+  await fails('select public.our_misses_prove_start(3)', [], 'P0001') // a This or That day
+  await fails("select public.our_misses_duel_start('pour')", [], 'P0001') // not in today's three
+  await at(T0 + 15 * 60_000) // Monday 00:05: a Prove It day now
+  await fails("select public.our_misses_tot_answer('tot-1', 0, 0)", [], 'P0001')
+  await fails("select public.our_misses_duel_start('mrt')", [], 'P0001')
+  // Ten days, each with one daily game and three different play games; never yesterday's set.
+  await as(null)
+  const cycle = (await db.query("select our_misses_private.lineup(date '2026-11-22' + n) as l from generate_series(0, 10) n")).rows.map((r) => r.l)
+  for (let i = 1; i < cycle.length; i++) {
+    assert.notDeepEqual([...cycle[i].play].sort(), [...cycle[i - 1].play].sort())
+    assert.notEqual(cycle[i].daily, cycle[i - 1].daily)
+    assert.equal(new Set(cycle[i].play).size, 3)
+  }
+  await as('anon')
+  await fails('select public.our_misses_lineup()')
+  await as('authenticated', ALEEM)
+  await fails('select our_misses_private.lineup(current_date)') // only through the public function
+  await at(T0)
+  checks += 8
+  // The rest of this suite plays every game on whatever day suits it.
+  await as(null)
+  await db.exec("create or replace function our_misses_private.on_today(p_game text, t timestamptz) returns boolean language sql stable set search_path = '' as $$ select true $$")
+  await as('authenticated', ALEEM)
+
   // A rally across midnight on Sunday.
   const a1 = await send(3)
   assert.equal(a1.events.length, 1)
-  assert.deepEqual({ ...a1.events[0], id: 0, created_at: 0 }, { id: 0, created_at: 0, player: 'Aleem', kind: 'miss', charge: 3, rally_length: 1, rally_bonus: 0, points: 3, ref_id: null })
+  assert.deepEqual({ ...a1.events[0], id: 0, created_at: 0 }, { id: 0, created_at: 0, player: 'Aleem', kind: 'miss', charge: 3, rally_length: 1, rally_bonus: 0, points: 3, ref_id: null, reason: null })
   assert.equal(a1.hearts.hearts, 2)
   assert.equal(Date.parse(a1.hearts.next_at), T0 + ms(30))
   checks += 3
@@ -358,6 +386,106 @@ try {
     week_start: '2026-11-23', aleem: 13 + 4 + 5 + 5, nurul: 7 + 1 + 3,
     aleem_misses: 3, nurul_misses: 2, same_brains: 1, longest_rally: 4,
     aleem_proven: 1, nurul_proven: 2, aleem_bluffs: 1, nurul_bluffs: 1, aleem_duels: 2, nurul_duels: 0,
+    hands: 0, tot: 0, best_chapteh: 0,
+  })
+  checks++
+
+  // ---- Phase 3: Why ----------------------------------------------------------------------
+  const T8 = T7 + DAY // Saturday 12:00, same season
+  await as('authenticated', ALEEM)
+  await at(T8)
+  const why = (await send(2)).events[0]
+  assert.equal((await rpc('our_misses_tag', why.id, 1)).reason, 1)
+  await fails('select public.our_misses_tag($1, 2)', [why.id], 'P0001') // tagged once
+  await fails('select public.our_misses_tag($1, 11)', [why.id], '22023')
+  const sameBrainRow = (await db.query("select id from public.our_misses_events where kind = 'same_brain' limit 1")).rows[0]
+  await fails('select public.our_misses_tag($1, 3)', [sameBrainRow.id], 'P0001') // only misses
+  await as('authenticated', NURUL)
+  await fails('select public.our_misses_tag($1, 3)', [why.id], 'P0001') // only your own
+  await as('authenticated', ALEEM)
+  await at(T8 + 30_000)
+  const late = (await send(1)).events[0]
+  await at(T8 + 30_000 + 11 * 60_000)
+  await fails('select public.our_misses_tag($1, 3)', [late.id], 'P0001') // within 10 minutes
+  assert.deepEqual((await db.query('select * from public.our_misses_reasons()')).rows, [{ player: 'Aleem', reason: 1, n: 1 }])
+  checks += 7
+
+  // ---- Phase 3: Hold hands ----------------------------------------------------------------
+  assert.deepEqual(await rpc('our_misses_hands', 45), { earned: 2, today: 2, cap: 5 })
+  assert.equal((await rpc('our_misses_hands', 19)).earned, 0)
+  assert.deepEqual(await rpc('our_misses_hands', 100), { earned: 3, today: 5, cap: 5 }, '5 a day at most')
+  assert.equal((await rpc('our_misses_hands', 100)).earned, 0)
+  await fails('select public.our_misses_hands(-1)', [], '22023')
+  await as('authenticated', NURUL)
+  assert.equal((await rpc('our_misses_hands', 60)).earned, 3)
+  checks += 6
+
+  // ---- Phase 3: This or That --------------------------------------------------------------
+  await as('authenticated', ALEEM)
+  assert.deepEqual((await rpc('our_misses_tot_today')).today, { day: '2026-11-28', revealed: false, Aleem: null, Nurul: null })
+  const aleemPick = await rpc('our_misses_tot_answer', 'tot-3', 1, 0)
+  assert.deepEqual([aleemPick.today.Aleem, aleemPick.today.Nurul], [{ question: 'tot-3', mine: 1, guess: 0 }, null])
+  await fails("select public.our_misses_tot_answer('tot-3', 0, 0)", [], 'P0001')
+  await fails("select public.our_misses_tot_answer('tot-3', 2, 0)", [], '22023')
+  await as('authenticated', NURUL)
+  assert.deepEqual((await rpc('our_misses_tot_today')).today.Aleem, { answered: true }, 'Hidden until you both answer.')
+  const totBoth = await rpc('our_misses_tot_answer', 'tot-3', 0, 1)
+  assert.equal(totBoth.today.revealed, true)
+  assert.deepEqual(totBoth.today.Aleem, { question: 'tot-3', mine: 1, guess: 0 })
+  assert.deepEqual((await eventsOf('tot')).map((e) => [e.player, e.points]), [['Aleem', 2], ['Nurul', 2]])
+  const album = await rpc('our_misses_tot_album', 10)
+  assert.deepEqual([album.length, album[0].day, album[0].Nurul.mine], [1, '2026-11-28', 0])
+  checks += 8
+
+  // ---- Phase 3: Kiasu Quiz (versus) -------------------------------------------------------
+  await as('authenticated', ALEEM)
+  await at(T8 + 60 * 60_000)
+  const quiz = await rpc('our_misses_duel_start', 'quiz')
+  assert.equal(quiz.game, 'quiz')
+  await at(T8 + 60 * 60_000 + 9_000)
+  await fails('select public.our_misses_duel_finish($1, 500, false)', [quiz.id], '22023') // 5 s into the quiz
+  await at(T8 + 60 * 60_000 + 70_000)
+  await fails('select public.our_misses_duel_finish($1, 2001, false)', [quiz.id], '22023')
+  assert.equal((await rpc('our_misses_duel_finish', quiz.id, 1600, false)).aleem_score, 1540, 'capped at a perfect quiz')
+  await as('authenticated', NURUL)
+  const quizDone = await rpc('our_misses_duel_finish', quiz.id, 1300, false)
+  assert.deepEqual([quizDone.winner, quizDone.points], ['Aleem', 5])
+  // Next Stop (the MRT quiz) plays by the same rules; today's +5 is already taken.
+  await at(T8 + 65 * 60_000)
+  const mrt = await rpc('our_misses_duel_start', 'mrt')
+  await at(T8 + 65 * 60_000 + 60_000)
+  await rpc('our_misses_duel_finish', mrt.id, 1700, false)
+  await as('authenticated', ALEEM)
+  const mrtDone = await rpc('our_misses_duel_finish', mrt.id, 900, false)
+  assert.deepEqual([mrtDone.game, mrtDone.nurul_score, mrtDone.winner, mrtDone.points], ['mrt', 1540, 'Nurul', 0])
+  checks += 6
+
+  // ---- Phase 3: Chapteh (together) --------------------------------------------------------
+  const kick = async (aleemSays, nurulSays, offsetMin) => {
+    await as('authenticated', ALEEM)
+    await at(T8 + offsetMin * 60_000)
+    const c = await rpc('our_misses_duel_start', 'chapteh')
+    await at(T8 + offsetMin * 60_000 + 40_000)
+    await rpc('our_misses_duel_finish', c.id, aleemSays, false)
+    await as('authenticated', NURUL)
+    return rpc('our_misses_duel_finish', c.id, nurulSays, false)
+  }
+  const firstRally = await kick(23, 21, 70)
+  assert.deepEqual([firstRally.winner, firstRally.points], ['tie', 0], 'Together: nobody wins.')
+  await kick(30, 30, 80)
+  await kick(40, 40, 90)
+  await kick(0, 0, 100)
+  // 21 agreed kicks = 5 each; 30 = 6 (a rally's max); 40 = 1 more before the 12-a-day cap.
+  assert.deepEqual((await eventsOf('rally')).map((e) => [e.player, e.points]), [['Aleem', 5], ['Nurul', 5], ['Aleem', 6], ['Nurul', 6], ['Aleem', 1], ['Nurul', 1]])
+  checks += 2
+
+  const board3 = (await db.query('select * from public.our_misses_weeks()')).rows[0]
+  assert.deepEqual({ ...board3, week_start: board3.week_start.toISOString().slice(0, 10) }, {
+    week_start: '2026-11-23',
+    aleem: 27 + 2 + 1 + 5 + 2 + 5 + 12, nurul: 11 + 3 + 2 + 12,
+    aleem_misses: 5, nurul_misses: 2, same_brains: 1, longest_rally: 4,
+    aleem_proven: 1, nurul_proven: 2, aleem_bluffs: 1, nurul_bluffs: 1, aleem_duels: 3, nurul_duels: 0,
+    hands: 8, tot: 4, best_chapteh: 40,
   })
   checks++
 
@@ -369,6 +497,10 @@ try {
   await as('authenticated', OUTSIDER)
   await fails('select public.our_misses_prove_today()')
   await fails('select public.our_misses_duel_start()')
+  for (const sql of ['select public.our_misses_tag(1, 1)', 'select * from public.our_misses_reasons()', 'select public.our_misses_hands(60)', 'select public.our_misses_tot_today()', "select public.our_misses_tot_answer('tot-1', 0, 0)", 'select public.our_misses_tot_album(5)']) await fails(sql)
+  await as('anon')
+  for (const sql of ['select public.our_misses_tag(1, 1)', 'select public.our_misses_hands(60)', 'select public.our_misses_tot_today()', 'select public.our_misses_tot_album(5)']) await fails(sql)
+  await fails('select * from our_misses_private.tot')
 
   console.log(`SQL checks passed: ${checks}`)
 } finally {

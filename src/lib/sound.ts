@@ -53,5 +53,6 @@ export const sfx = {
   win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, i * 0.08, 0.35, 'triangle', 0.08)); buzz([30, 40, 60]) },
   lose() { [392, 370, 349, 262].forEach((f, i) => tone(f, i * 0.22, 0.3, 'sawtooth', 0.04)); buzz(120) },
   tap() { tone(520 + Math.random() * 80, 0, 0.04, 'square', 0.025) },
+  heartbeat() { tone(72, 0, 0.13, 'sine', 0.3, 55); tone(64, 0.2, 0.16, 'sine', 0.24, 50) },
   unlock() { audio() },
 }

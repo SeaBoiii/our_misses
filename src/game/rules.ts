@@ -8,13 +8,15 @@ export const partnerOf = (p: Player): Player => (p === 'Aleem' ? 'Nurul' : 'Alee
 export interface MissEvent {
   id: number
   player: Player
-  kind: 'miss' | 'same_brain' | 'prove_it' | 'duel'
+  kind: 'miss' | 'same_brain' | 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally'
   charge: number | null
   rally_length: number | null
   rally_bonus: number
   points: number
   ref_id: number | null
   created_at: string
+  /** Why I miss you (1-10, see REASONS); only on misses. */
+  reason?: number | null
 }
 export interface HeartState { hearts: number; next_at: string | null }
 export interface Status { me: Player; now: string; week_start: string; hearts: Record<Player, HeartState> }
@@ -33,15 +35,30 @@ export interface WeekTotal {
   nurul_bluffs: number
   aleem_duels: number
   nurul_duels: number
+  /** Misses from holding hands (both of you). */
+  hands: number
+  /** Misses from This or That (both of you). */
+  tot: number
+  /** Longest chapteh rally that week. */
+  best_chapteh: number
 }
+
+/** This or That: the partner's answer is hidden (only `answered`) until you have both answered. */
+export interface TotEntry { answered?: boolean; question?: string; mine?: number; guess?: number }
+export interface TotDay { day: string; revealed: boolean; Aleem: TotEntry | null; Nurul: TotEntry | null }
+export interface TotStatus { now: string; day: string; today: TotDay }
+export interface ReasonCount { player: Player; reason: number; n: number }
 
 /** One player's Prove It for a day. The partner's claim is hidden (only `finished`) until the reveal. */
 export interface ProveEntry { finished: boolean; level?: number; target?: number; score?: number | null; passed?: boolean | null; started_at?: string }
 export interface ProveDay { day: string; revealed: boolean; Aleem: ProveEntry | null; Nurul: ProveEntry | null }
 export interface ProveStatus { now: string; day: string; today: ProveDay; last: ProveDay | null }
 export interface ProveStart { level: number; target: number; started_at: string }
-/** VS games. tug: 15 s of tapping. pour: a water sort race on one shared puzzle. */
-export type VsGame = 'tug' | 'pour'
+/**
+ * VS games. tug: 15 s of tapping. pour: a water sort race on one shared puzzle.
+ * quiz / mrt: the same 7 questions (SG trivia / the MRT network). chapteh: together, one shared rally.
+ */
+export type VsGame = 'tug' | 'pour' | 'quiz' | 'chapteh' | 'mrt'
 export interface Duel {
   id: number
   game: VsGame
@@ -57,18 +74,23 @@ export interface Duel {
   now: string
 }
 export const DUEL_COUNTDOWN_MS = 4_000
-export const VS_LENGTH_MS: Record<VsGame, number> = { tug: 15_000, pour: 180_000 }
+export const VS_LENGTH_MS: Record<VsGame, number> = { tug: 15_000, pour: 180_000, quiz: 110_000, chapteh: 300_000, mrt: 110_000 }
+export const isQuizGame = (g: VsGame) => g === 'quiz' || g === 'mrt'
 export const DUEL_POINTS = 5
 export const SOLVED_BASE = 1_000_000
 /** Mirrors the database: how a finished VS game is scored. */
 export function vsScore(game: VsGame, value: number, solved: boolean, elapsedMs: number) {
   if (game === 'tug') return Math.min(300, Math.max(0, value))
+  if (game === 'quiz' || game === 'mrt') return Math.min(1540, Math.max(0, value))
+  if (game === 'chapteh') return Math.min(500, Math.max(0, value))
   return solved ? SOLVED_BASE - Math.min(SOLVED_BASE - 1, Math.floor(elapsedMs)) : Math.min(20, Math.max(0, value))
 }
 /** "48 taps", "solved in 1:02.4", "3 bottles". */
 export function describeVsScore(game: VsGame, score: number | null) {
   if (score === null) return 'no score'
   if (game === 'tug') return `${score} tap${score === 1 ? '' : 's'}`
+  if (game === 'quiz' || game === 'mrt') return `${score} pts`
+  if (game === 'chapteh') return `${score} kick${score === 1 ? '' : 's'}`
   if (score >= SOLVED_BASE / 2) {
     const ms = SOLVED_BASE - score
     const m = Math.floor(ms / 60_000)
@@ -81,6 +103,7 @@ export function describeVsScore(game: VsGame, score: number | null) {
 export const emptyWeek = (week_start: string): WeekTotal => ({
   week_start, aleem: 0, nurul: 0, aleem_misses: 0, nurul_misses: 0, same_brains: 0, longest_rally: 0,
   aleem_proven: 0, nurul_proven: 0, aleem_bluffs: 0, nurul_bluffs: 0, aleem_duels: 0, nurul_duels: 0,
+  hands: 0, tot: 0, best_chapteh: 0,
 })
 
 export const HEART_CAP = 3
@@ -238,8 +261,11 @@ export function weekTotalsFrom(events: readonly MissEvent[]): WeekTotal[] {
     } else if (e.kind === 'prove_it') {
       if (e.player === 'Aleem') w.aleem_proven++
       else w.nurul_proven++
-    } else if (e.player === 'Aleem') w.aleem_duels++
-    else w.nurul_duels++
+    } else if (e.kind === 'duel') {
+      if (e.player === 'Aleem') w.aleem_duels++
+      else w.nurul_duels++
+    } else if (e.kind === 'hands') w.hands += e.points
+    else if (e.kind === 'tot') w.tot += e.points
     byWeek.set(k, w)
   }
   return [...byWeek.values()].sort((a, b) => b.week_start.localeCompare(a.week_start))
@@ -257,8 +283,8 @@ export interface History {
 export function history(weeks: readonly WeekTotal[], currentWeek: string, liveWeek?: WeekTotal): History {
   const merged = weeks.filter((w) => w.week_start !== currentWeek)
   const stored = weeks.find((w) => w.week_start === currentWeek)
-  // Bluffs aren't in the ledger, so the live week keeps the database's count of them.
-  if (liveWeek) merged.push({ ...liveWeek, aleem_bluffs: stored?.aleem_bluffs ?? 0, nurul_bluffs: stored?.nurul_bluffs ?? 0 })
+  // Bluffs and rally lengths aren't in the ledger, so the live week keeps the database's.
+  if (liveWeek) merged.push({ ...liveWeek, aleem_bluffs: stored?.aleem_bluffs ?? 0, nurul_bluffs: stored?.nurul_bluffs ?? 0, best_chapteh: stored?.best_chapteh ?? 0 })
   else if (stored) merged.push(stored)
   merged.sort((a, b) => b.week_start.localeCompare(a.week_start))
   const rows: HistoryRow[] = merged.map((w) => ({

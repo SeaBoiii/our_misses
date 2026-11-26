@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Backend, Signal } from './backend'
+import { flightMs, gradeKick, KICK_WINDOWS, randomZone, type KickGrade, type Zone } from '../game/more'
 import { partnerOf, VS_LENGTH_MS, type Duel, type VsGame } from '../game/rules'
 import { sfx } from './sound'
+
+/** Chapteh: how many kicks so far, and the chapteh coming at you (if it's your turn). */
+export interface Rally {
+  kicks: number
+  incoming: { zone: Zone; ms: number; arriveAt: number } | null
+  myServe: boolean
+  grade: KickGrade | null
+}
+const NO_RALLY: Rally = { kicks: 0, incoming: null, myServe: false, grade: null }
 
 const INVITE_MS = 20_000
 
@@ -27,6 +37,9 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
   const [theirs, setTheirs] = useState(0)
   const [theirsSolved, setTheirsSolved] = useState(false)
   const [iSolved, setISolved] = useState(false)
+  const [rally, setRallyState] = useState<Rally>(NO_RALLY)
+  const rallyRef = useRef<Rally>(NO_RALLY)
+  const setRally = useCallback((r: Rally) => { rallyRef.current = r; setRallyState(r) }, [])
   const phaseRef = useRef(phase)
   const mineRef = useRef(0)
   const solvedRef = useRef(false)
@@ -45,8 +58,10 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
     setTheirs(0)
     setTheirsSolved(false)
     setISolved(false)
+    // Chapteh: whoever sent the challenge serves (the other one started the game by accepting).
+    setRally({ ...NO_RALLY, myServe: duel.game === 'chapteh' && duel.started_by !== me })
     go({ kind: 'live', duel })
-  }, [go])
+  }, [go, me, setRally])
 
   const settleWith = useCallback((duel: Duel) => {
     if (phaseRef.current.kind !== 'reporting') return
@@ -111,6 +126,44 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
     const p = phaseRef.current
     if (p.kind === 'live') go({ kind: 'reporting', duel: p.duel })
   }
+  /** Kiasu Quiz: points so far; reports once all 7 questions are answered. */
+  const quizProgress = (score: number, done: boolean) => {
+    const duel = playing()
+    if (!duel || (duel.game !== 'quiz' && duel.game !== 'mrt')) return
+    mineRef.current = score
+    setMine(score)
+    if (done) go({ kind: 'reporting', duel })
+  }
+
+  // ---- Chapteh: one rally kicked between the two phones ------------------------------
+  const dropRally = (kicks: number, tell: boolean) => {
+    const p = phaseRef.current
+    if (p.kind !== 'live' || p.duel.game !== 'chapteh') return
+    mineRef.current = kicks
+    setMine(kicks)
+    setRally({ ...rallyRef.current, kicks, incoming: null, grade: 'miss' })
+    if (tell) { backend.signal({ type: 'chapteh_drop', kicks }); sfx.lose() }
+    go({ kind: 'reporting', duel: p.duel })
+  }
+  /** Serve the first kick (whoever sent the challenge). */
+  const serve = () => {
+    const r = rallyRef.current
+    if (playing()?.game !== 'chapteh' || !r.myServe || r.kicks > 0) return
+    backend.signal({ type: 'chapteh_kick', kicks: 1, zone: randomZone(), ms: flightMs(1) })
+    setRally({ kicks: 1, incoming: null, myServe: false, grade: null })
+    sfx.pop(1)
+  }
+  /** Kick the incoming chapteh with a zone (left foot, knee, right foot). */
+  const kick = (zone: Zone) => {
+    const r = rallyRef.current
+    if (playing()?.game !== 'chapteh' || !r.incoming) return
+    const grade = gradeKick(performance.now() - r.incoming.arriveAt)
+    if (zone !== r.incoming.zone || grade === 'miss') { dropRally(r.kicks, true); return }
+    const kicks = r.kicks + 1
+    backend.signal({ type: 'chapteh_kick', kicks, zone: randomZone(), ms: flightMs(kicks) })
+    setRally({ kicks, incoming: null, myServe: false, grade })
+    sfx.pop(grade === 'perfect' ? 3 : 1)
+  }
 
   const onSignal = useCallback((s: Signal) => {
     const p = phaseRef.current
@@ -136,6 +189,11 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
     if (s.type === 'duel_done' && p.kind === 'reporting' && s.id === p.duel.id) {
       backend.duelGet(s.id).then((d) => { if (d.settled) settleWith(d) }).catch(() => { /* polling covers it */ })
     }
+    if (s.type === 'chapteh_kick' && p.kind === 'live' && p.duel.game === 'chapteh') {
+      setRally({ kicks: s.kicks, incoming: { zone: s.zone, ms: s.ms, arriveAt: performance.now() + s.ms }, myServe: false, grade: null })
+    }
+    if (s.type === 'chapteh_drop' && p.kind === 'live' && p.duel.game === 'chapteh') dropRally(s.kicks, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backend, begin, go, partner, settleWith, toast])
 
   // Invite timeouts, sharing progress during play, and the final whistle.
@@ -150,7 +208,13 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
       }
       if (p.kind === 'live') {
         const start = Date.parse(p.duel.starts_at)
-        if (t >= start && mineRef.current !== sentRef.current) {
+        // Chapteh: let it fall past your feet and the rally is over.
+        const r = rallyRef.current
+        if (p.duel.game === 'chapteh' && r.incoming && performance.now() > r.incoming.arriveAt + KICK_WINDOWS.ok + 80) {
+          dropRally(r.kicks, true)
+          return
+        }
+        if (p.duel.game !== 'chapteh' && t >= start && mineRef.current !== sentRef.current) {
           sentRef.current = mineRef.current
           backend.signal({ type: 'duel_progress', value: mineRef.current })
         }
@@ -197,7 +261,7 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
   }, [phase.kind])
 
   return {
-    phase, mine, theirs, theirsSolved, iSolved, me, partner,
+    phase, mine, theirs, theirsSolved, iSolved, rally, me, partner, quizProgress, serve, kick,
     pick, invite, cancel, accept, decline, close, tap, pourProgress, giveUp, onSignal, serverNow,
   }
 }

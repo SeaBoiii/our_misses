@@ -13,7 +13,7 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 }
 
-async function mockProject(page: Page, opts: { member?: boolean; hearts?: number; refuse?: boolean } = {}) {
+async function mockProject(page: Page, opts: { member?: boolean; hearts?: number; refuse?: boolean; lineup?: unknown } = {}) {
   const sent: unknown[] = []
   const proveCalls: { fn: string; body: unknown }[] = []
   let mine: Record<string, unknown> | null = null
@@ -31,11 +31,26 @@ async function mockProject(page: Page, opts: { member?: boolean; hearts?: number
     if (path === '/auth/v1/logout') return route.fulfill({ status: 204 })
     if (opts.member === false && path.startsWith('/rest/')) return json(route, { code: '42501', message: 'not a member', details: null, hint: null }, 403)
     if (path === '/rest/v1/rpc/our_misses_status') return json(route, status())
+    if (path === '/rest/v1/rpc/our_misses_lineup' && opts.lineup) return json(route, opts.lineup)
     if (path === '/rest/v1/rpc/our_misses_weeks') return json(route, [
       { week_start: '2026-11-16', aleem: 7, nurul: 9, aleem_misses: 4, nurul_misses: 5, same_brains: 1, longest_rally: 3, aleem_proven: 2, nurul_proven: 3, aleem_bluffs: 1, nurul_bluffs: 0, aleem_duels: 1, nurul_duels: 0 },
       { week_start: '2026-11-09', aleem: 12, nurul: 5, aleem_misses: 6, nurul_misses: 3, same_brains: 0, longest_rally: 2, aleem_proven: 0, nurul_proven: 0, aleem_bluffs: 0, nurul_bluffs: 0, aleem_duels: 0, nurul_duels: 0 },
     ])
     if (path === '/rest/v1/our_misses_events') return json(route, [])
+    if (path === '/rest/v1/rpc/our_misses_reasons') return json(route, [{ player: 'Aleem', reason: 1, n: 4 }, { player: 'Nurul', reason: 9, n: 2 }])
+    if (path === '/rest/v1/rpc/our_misses_tag') {
+      const body = route.request().postDataJSON()
+      proveCalls.push({ fn: 'tag', body })
+      return json(route, { id: body.p_id, player: 'Aleem', kind: 'miss', charge: 1, rally_length: 1, rally_bonus: 0, points: 1, ref_id: null, created_at: now(), reason: body.p_reason })
+    }
+    const totDay = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10)
+    if (path === '/rest/v1/rpc/our_misses_tot_today') return json(route, { now: now(), day: totDay, today: { day: totDay, revealed: false, Aleem: null, Nurul: null } })
+    if (path === '/rest/v1/rpc/our_misses_tot_album') return json(route, [])
+    if (path === '/rest/v1/rpc/our_misses_tot_answer') {
+      const body = route.request().postDataJSON()
+      proveCalls.push({ fn: 'tot', body })
+      return json(route, { now: now(), day: totDay, today: { day: totDay, revealed: false, Aleem: { question: body.p_question, mine: body.p_mine, guess: body.p_guess }, Nurul: null } })
+    }
     const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10)
     const proveStatus = () => ({ now: now(), day: today, today: { day: today, revealed: false, Aleem: mine, Nurul: null }, last: null })
     if (path === '/rest/v1/rpc/our_misses_prove_today') return json(route, proveStatus())
@@ -150,7 +165,9 @@ test('the history board shows Prove It and Duel stats', async ({ page }) => {
   const week = page.getByTestId('week').nth(1)
   await expect(week).toContainText('🔍 2 vs 3 proven')
   await expect(week).toContainText('🤥 bluffs 1–0')
-  await expect(week).toContainText('⚔️ duels 1–0')
+  await expect(week).toContainText('⚔️ versus 1–0')
+  await expect(page.getByTestId('why-board')).toContainText('a song came on ×4')
+  await expect(page.getByTestId('why-board')).toContainText('can’t sleep ×2')
 })
 
 test('once signed in, reopening the app goes straight to the rope', async ({ page }) => {
@@ -167,4 +184,34 @@ test('the sign-in screen explains how to install it on an iPhone first', async (
   await page.goto('/')
   await expect(page.getByTestId('install')).toContainText('Add to Home Screen')
   await expect(page.getByTestId('install')).toContainText('sign in there once')
+})
+
+test('Why and This or That go through the database with the right values', async ({ page }) => {
+  const mock = await mockProject(page)
+  await signIn(page)
+  await hold(page, 100)
+  await page.getByTestId('why-9').click()
+  await expect.poll(() => mock.proveCalls.find((c) => c.fn === 'tag')?.body).toEqual({ p_id: 1, p_reason: 9 })
+  await expect(page.locator('.feed li').first()).toContainText('🌙 can’t sleep')
+  await page.getByTestId('open-tot').click()
+  await page.getByTestId('tot-1').click()
+  await page.getByTestId('tot-0').click()
+  await expect(page.getByTestId('tot-waiting')).toContainText('hasn’t answered yet')
+  const body = mock.proveCalls.find((c) => c.fn === 'tot')?.body as { p_question: string; p_mine: number; p_guess: number }
+  expect([body.p_mine, body.p_guess]).toEqual([1, 0])
+  expect(body.p_question).toMatch(/^tot-\d+$/)
+})
+
+test('the Today card follows the database’s daily lineup', async ({ page }) => {
+  await mockProject(page, {
+    lineup: {
+      today: { day: '2026-11-24', daily: 'tot', play: ['pour', 'mrt', 'chapteh'] },
+      tomorrow: { day: '2026-11-25', daily: 'prove', play: ['tug', 'pour', 'quiz'] },
+    },
+  })
+  await signIn(page)
+  await expect(page.getByTestId('open-tot')).toBeVisible()
+  await expect(page.getByTestId('open-prove')).toHaveCount(0)
+  await expect(page.getByTestId('today-games')).toHaveText(/Pour-off.*Next Stop.*Chapteh/)
+  await expect(page.getByTestId('teaser')).toHaveText('Tomorrow: 🔍 Prove It · 🪢 🧪 🧠')
 })

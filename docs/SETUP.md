@@ -6,7 +6,7 @@ Four parts: the database, the repository, the domain, and a first check. Nothing
 
 **Recommended: reuse the our_miles project.** Both Auth accounts already exist there, and two apps using it every day keeps the free project from pausing. Every object this migration creates is prefixed `our_misses`, so it doesn't touch the wallet tables. (A fresh project works too; then also follow our_miles' guide for creating the two accounts with sign-ups turned off.)
 
-1. Open the project's **SQL Editor** and run each file in [`supabase/migrations/`](../supabase/migrations/) in order: [`202611230001_our_misses.sql`](../supabase/migrations/202611230001_our_misses.sql), then [`202611230002_prove_it_and_duel.sql`](../supabase/migrations/202611230002_prove_it_and_duel.sql). Together they create the ledger, hearts, Prove It claims and duels, the functions the app calls, the row-level security rules, live updates for the ledger, and the private "room" used for the *is here* dot.
+1. Open the project's **SQL Editor** and run each file in [`supabase/migrations/`](../supabase/migrations/) in order: [`202611230001_our_misses.sql`](../supabase/migrations/202611230001_our_misses.sql), then [`202611230002_prove_it_and_duel.sql`](../supabase/migrations/202611230002_prove_it_and_duel.sql), then [`202611260001_more_ways_to_miss.sql`](../supabase/migrations/202611260001_more_ways_to_miss.sql). Together they create the ledger, hearts, Prove It claims and duels, the functions the app calls, the row-level security rules, live updates for the ledger, and the private "room" used for the *is here* dot.
 2. Allowlist the two players. If you reused the our_miles project, copy its pair:
 
    ```sql

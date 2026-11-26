@@ -55,7 +55,7 @@ function Pair({ day, me, partner }: { day: ProveDay; me: Player; partner: Player
 }
 
 /** Prove It: claim how much you missed them today, then catch enough to prove it. */
-export function ProveIt({ backend, me, partner, refresh, onBack, onChange, toast }: {
+export function ProveIt({ backend, me, partner, refresh, onBack, onChange, toast, onToday = true }: {
   backend: Backend
   me: Player
   partner: Player
@@ -64,6 +64,8 @@ export function ProveIt({ backend, me, partner, refresh, onBack, onChange, toast
   onBack(): void
   onChange(s: ProveStatus): void
   toast(text: string, tone?: 'love' | 'warn'): void
+  /** Is Prove It in today's lineup? If not, only past results are shown. */
+  onToday?: boolean
 }) {
   const [status, setStatus] = useState<ProveStatus | null>(null)
   const [pick, setPick] = useState<number | null>(null)
@@ -135,7 +137,12 @@ export function ProveIt({ backend, me, partner, refresh, onBack, onChange, toast
         <h2 id="prove-title">Prove It 🔍</h2>
       </div>
 
-      {!status ? <p className="loading">{error ?? 'opening today’s round…'}</p> : !mine ? (
+      {!status ? <p className="loading">{error ?? 'opening today’s round…'}</p> : !mine && !onToday ? (
+        <div className="card stack" data-testid="not-today">
+          <p className="prove-headline">Prove It is resting today</p>
+          <p className="muted small center-text">The games rotate every day. It’ll be back in the lineup soon.</p>
+        </div>
+      ) : !mine ? (
         <div className="card stack">
           <p className="prove-ask">How much did you miss {partner} today?</p>
           <p className="muted small">Then prove it: catch enough in 20 seconds. Bigger claims need bigger catches. One try a day, and walking away counts as a bluff.</p>

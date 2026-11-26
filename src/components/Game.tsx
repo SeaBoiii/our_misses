@@ -1,23 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { Backend, Signal } from '../lib/backend'
+import type { Backend, Change, Signal } from '../lib/backend'
 import { PROVE_LEVELS } from '../game/catch'
+import { dailyOn, playOn, previousDay, type Lineup, type Lineups } from '../game/lineup'
+import { HANDS_DAILY_CAP, reasonOf, REASONS, TAG_WINDOW_MS, totOfDay } from '../game/more'
+import { VS_GAMES } from '../game/vsGames'
 import {
   dayKey, history as buildHistory, liveHearts, NoHeartsError, partnerOf, rallyState, seasons, totals, WEEK_MS, weekKey,
   weekStartMs, weekTotalsFrom, emptyWeek,
-  type MissEvent, type Player, type ProveStatus, type Status, type WeekTotal,
+  type MissEvent, type Player, type ProveStatus, type ReasonCount, type Status, type TotStatus, type WeekTotal,
 } from '../game/rules'
 import { ago, countdown, weekLabel } from '../lib/format'
 import { isMuted, setMuted, sfx } from '../lib/sound'
 import { useDuel } from '../lib/useDuel'
+import { useHands } from '../lib/useHands'
 import { DuelOverlay } from './Duel'
 import { History } from './History'
+import { HoldHands } from './HoldHands'
 import { InstallCard } from './Install'
 import { MissButton } from './MissButton'
 import { ProveIt } from './ProveIt'
 import { Rope } from './Rope'
+import { ThisOrThat } from './ThisOrThat'
 
-type View = 'rope' | 'history' | 'prove'
-const viewFromHash = (): View => (location.hash === '#history' ? 'history' : location.hash === '#prove' ? 'prove' : 'rope')
+type View = 'rope' | 'history' | 'prove' | 'tot'
+const VIEWS = ['history', 'prove', 'tot'] as const
+const viewFromHash = (): View => (VIEWS as readonly string[]).includes(location.hash.slice(1)) ? (location.hash.slice(1) as View) : 'rope'
 
 interface Toast { id: number; text: string; tone?: 'love' | 'warn' }
 interface Flight { id: number; from: DOMRect; to: DOMRect; size: number; tone: 'out' | 'in' }
@@ -56,6 +63,14 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
   const [menu, setMenu] = useState(false)
   const [prove, setProve] = useState<ProveStatus | null>(null)
   const [proveRefresh, setProveRefresh] = useState(0)
+  const [tot, setTot] = useState<TotStatus | null>(null)
+  const [totRefresh, setTotRefresh] = useState(0)
+  const [reasons, setReasons] = useState<ReasonCount[]>([])
+  /** Today's rotation (null until loaded, or if it can't be: then everything shows and the database decides). */
+  const [lineups, setLineups] = useState<Lineups | null>(null)
+  const lineupDay = useRef('')
+  /** Why I miss you: the miss you just sent, while it can still be tagged. */
+  const [tagFor, setTagFor] = useState<{ id: number; until: number } | null>(null)
   const lastResultsToast = useRef(0)
 
   const known = useRef(new Set<number>())
@@ -94,11 +109,16 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
     try {
       const s = await backend.status()
       const serverNow = Date.parse(s.now)
-      const [ev, wk, pv] = await Promise.all([
+      const [ev, wk, pv, tt, lu] = await Promise.all([
         backend.weekEvents(new Date(weekStartMs(serverNow)).toISOString()),
         backend.weeks(),
         backend.proveToday().catch(() => null),
+        backend.totToday().catch(() => null),
+        backend.lineup().catch(() => null),
       ])
+      if (tt) setTot(tt)
+      setLineups(lu ?? null)
+      lineupDay.current = dayKey(serverNow)
       known.current = new Set(ev.map((e) => e.id))
       week.current = weekKey(serverNow)
       setOffset(serverNow - Date.now())
@@ -116,7 +136,14 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
     backend.status().then(setStatus).catch(() => { /* next tick will retry */ })
   }, [backend])
 
-  const receive = useCallback((e: MissEvent) => {
+  const receive = useCallback((e: MissEvent, change: Change = 'insert') => {
+    if (change === 'update') {
+      // Why I miss you: a reason added to a miss already on screen.
+      setEvents((prev) => prev.map((x) => (x.id === e.id ? { ...x, ...e } : x)))
+      const why = reasonOf(e.reason)
+      if (why && e.player !== me) toast(`💭 ${partner}: ${why.icon} ${why.label}`, 'love')
+      return
+    }
     if (known.current.has(e.id)) return
     known.current.add(e.id)
     if (weekKey(Date.parse(e.created_at)) !== week.current) { void load(); return }
@@ -128,7 +155,8 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       setProveRefresh((n) => n + 1)
       return
     }
-    if (e.kind === 'duel') return
+    if (e.kind === 'tot') { setTotRefresh((n) => n + 1); return }
+    if (e.kind !== 'miss') return
     if (e.player === me) return
     fly(avatarEl(partner), avatarEl(me), e.charge ?? 1, 'in')
     sfx.receive()
@@ -142,23 +170,39 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
   useEffect(() => { receiveRef.current = receive }, [receive])
 
   const duel = useDuel({ backend, offset, toast })
+  const hands = useHands({ backend, toast })
   const signal = useCallback((s: Signal) => {
     if (s.type === 'prove_played') {
       toast(`🔍 ${partner} just played Prove It`, 'love')
       setProveRefresh((n) => n + 1)
       return
     }
+    if (s.type === 'tot_answered') {
+      toast(`🤔 ${partner} answered This or That`, 'love')
+      setTotRefresh((n) => n + 1)
+      return
+    }
+    if (s.type === 'hands') { hands.onSignal(s); return }
     duel.onSignal(s)
-  }, [duel, partner, toast])
+  }, [duel, hands, partner, toast])
   const signalRef = useRef(signal)
   useEffect(() => { signalRef.current = signal }, [signal])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => backend.subscribe((e) => receiveRef.current(e), setHere, (s) => signalRef.current(s)), [backend])
+  useEffect(() => backend.subscribe((e, change) => receiveRef.current(e, change), setHere, (s) => signalRef.current(s)), [backend])
   useEffect(() => {
     if (proveRefresh === 0) return
     backend.proveToday().then(setProve).catch(() => { /* keep the last one */ })
   }, [backend, proveRefresh])
+  useEffect(() => {
+    if (totRefresh === 0) return
+    backend.totToday().then(setTot).catch(() => { /* keep the last one */ })
+  }, [backend, totRefresh])
+  useEffect(() => {
+    if (!tagFor) return
+    const id = setTimeout(() => setTagFor(null), Math.max(0, tagFor.until - Date.now()))
+    return () => clearTimeout(id)
+  }, [tagFor])
   useEffect(() => {
     const id = setInterval(() => setClock(Date.now()), 1000)
     const wake = () => { if (document.visibilityState === 'visible') void load() }
@@ -167,6 +211,8 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
   }, [load])
   useEffect(() => {
     if (week.current && weekKey(now) !== week.current) void load()
+    // A new day brings a new lineup (and settles yesterday's Prove It / This or That).
+    else if (lineupDay.current && dayKey(now) !== lineupDay.current) void load()
   }, [now, load])
   useEffect(() => {
     if (!sameBrain) return
@@ -189,6 +235,24 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
   const openHistory = () => {
     open('history')
     backend.weeks().then(setWeeks).catch(() => { /* keep what we have */ })
+    backend.reasons().then((r) => setReasons(r ?? [])).catch(() => { /* optional */ })
+  }
+  useEffect(() => {
+    if (view === 'history') backend.reasons().then((r) => setReasons(r ?? [])).catch(() => { /* optional */ })
+  }, [view, backend])
+
+  const tagMiss = async (reason: number) => {
+    if (!tagFor) return
+    const id = tagFor.id
+    setTagFor(null)
+    try {
+      const tagged = await backend.tag(id, reason)
+      setEvents((prev) => prev.map((x) => (x.id === id ? { ...x, reason: tagged.reason } : x)))
+      const why = reasonOf(reason)
+      toast(`${why?.icon} ${partner} will see: ${why?.label}`, 'love')
+    } catch (e) {
+      toast(errorText(e), 'warn')
+    }
   }
   const closeView = () => {
     if (pushedView.current) { pushedView.current = false; window.history.back() }
@@ -229,6 +293,7 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       setEvents((prev) => [...prev, ...fresh].sort(byId))
       setPull((p) => ({ by: me, n: (p?.n ?? 0) + 1 }))
       const miss = r.events.find((e) => e.kind === 'miss')
+      if (miss) setTagFor({ id: miss.id, until: Date.now() + 20_000 })
       if (burst) toast('Missed them too much 💥 +1', 'warn')
       else if (miss && miss.rally_bonus > 0) toast(`Rally ×${miss.rally_length}! +${miss.rally_bonus} bonus`, 'love')
       if (r.events.some((e) => e.kind === 'same_brain')) celebrate()
@@ -267,8 +332,25 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
         : prove.today.revealed ? `you ${myProve.passed ? '✓' : '🤥'} · ${partner} ${theirProve?.passed ? '✓' : '🤥'}`
           : `${myProve.passed ? 'proven ✓' : 'bluff 🤥'} · waiting for ${partner}`
   const todaysDuel = events.find((e) => e.kind === 'duel' && dayKey(Date.parse(e.created_at)) === dayKey(now))
-  const duelLine = todaysDuel ? `today’s +5 misses went to ${todaysDuel.player === me ? 'you' : partner}`
-    : partnerHere ? `Tug or Pour-off · first win today +5 misses` : `${partner} needs to be here`
+  const today: Lineup | null = lineups?.today ?? null
+  const playToday = (Object.keys(VS_GAMES) as (keyof typeof VS_GAMES)[]).filter((g) => playOn(today, g))
+  const duelLine = !partnerHere ? `${partner} needs to be here`
+    : todaysDuel ? `today’s +5 went to ${todaysDuel.player === me ? 'you' : partner}`
+      : 'first versus win today +5'
+  const tomorrow = lineups?.tomorrow
+  const teaser = tomorrow && !tomorrow.all
+    ? `Tomorrow: ${tomorrow.daily === 'prove' ? '🔍 Prove It' : '🤔 This or That'} · ${tomorrow.play.map((g) => VS_GAMES[g].icon).join(' ')}`
+    : null
+  // On a This or That day, yesterday's Prove It results are revealed: keep a way to see them.
+  const yesterdayProve = !dailyOn(today, 'prove') && prove?.last?.revealed && prove.last.day === previousDay(dayKey(now))
+  const myTot = tot?.today[me] ?? null
+  const totLine = !tot ? '…'
+    : !myTot ? `${totOfDay(tot.day).a} or ${totOfDay(tot.day).b}?`
+      : tot.today.revealed ? 'results are in' : `waiting for ${partner}`
+  const handsToday = events.filter((e) => e.kind === 'hands' && e.player === me && dayKey(Date.parse(e.created_at)) === dayKey(now))
+    .reduce((sum, e) => sum + e.points, 0)
+  const handsLine = partnerHere ? `${partner} is here · ${handsToday}/${HANDS_DAILY_CAP} today` : `best when ${partner} is on too`
+  const canTag = tagFor && now - (events.find((e) => e.id === tagFor.id) ? Date.parse(events.find((e) => e.id === tagFor.id)!.created_at) : now) < TAG_WINDOW_MS
   const winnerLine = season.lastWeek && (season.lastWeek.winner === 'tie'
     ? `Last week was a tie, ${season.lastWeek.aleem}–${season.lastWeek.nurul}. Same brain.`
     : `Last week 🏆 ${season.lastWeek.winner === me ? 'you' : season.lastWeek.winner} missed more, ${Math.max(season.lastWeek.aleem, season.lastWeek.nurul)}–${Math.min(season.lastWeek.aleem, season.lastWeek.nurul)}`)
@@ -296,9 +378,10 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
         </div>
       )}
 
-      {view === 'history' ? <History data={board} me={me} onBack={closeView} />
-        : view === 'prove' ? <ProveIt backend={backend} me={me} partner={partner} refresh={proveRefresh} onBack={closeView} onChange={setProve} toast={toast} />
-          : <>
+      {view === 'history' ? <History data={board} me={me} reasons={reasons} onBack={closeView} />
+        : view === 'prove' ? <ProveIt backend={backend} me={me} partner={partner} refresh={proveRefresh} onBack={closeView} onChange={setProve} toast={toast} onToday={dailyOn(today, 'prove')} />
+          : view === 'tot' ? <ThisOrThat backend={backend} me={me} partner={partner} refresh={totRefresh} onBack={closeView} onChange={setTot} toast={toast} onToday={dailyOn(today, 'tot')} />
+            : <>
       {winnerLine && <button className="banner" onClick={openHistory}>{winnerLine} <span aria-hidden="true">›</span></button>}
 
       <section className="card board" aria-label="This week's tug of war">
@@ -356,20 +439,51 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
         {mine.nextAt && <small>next in {countdown(mine.nextAt - now)}</small>}
       </div>
 
+      {canTag && (
+        <div className="why" role="group" aria-label="Why do you miss them?" data-testid="why">
+          <p className="why-title">Why? <small>{partner} will see it</small></p>
+          <div className="why-chips">
+            {REASONS.map((r) => (
+              <button key={r.id} className="why-chip" onClick={() => void tagMiss(r.id)} aria-label={r.label} title={r.label} data-testid={`why-${r.id}`}>
+                <span aria-hidden="true">{r.icon}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <section className="card today" aria-label="Today">
-        <h2>Today</h2>
+        <h2>Today <small>new games every day</small></h2>
         <div className="today-grid">
-          <button className="today-btn" onClick={() => open('prove')} data-testid="open-prove">
-            <span className="today-icon" aria-hidden="true">🔍</span>
-            <span className="today-name">Prove It</span>
-            <small>{proveLine}</small>
+          {dailyOn(today, 'prove') && (
+            <button className="today-btn" onClick={() => open('prove')} data-testid="open-prove">
+              <span className="today-icon" aria-hidden="true">🔍</span>
+              <span className="today-name">Prove It</span>
+              <small>{proveLine}</small>
+            </button>
+          )}
+          {dailyOn(today, 'tot') && (
+            <button className="today-btn" onClick={() => open('tot')} data-testid="open-tot">
+              <span className="today-icon" aria-hidden="true">🤔</span>
+              <span className="today-name">This or That</span>
+              <small>{totLine}</small>
+            </button>
+          )}
+          <button className="today-btn" onClick={hands.openScreen} data-testid="open-hands">
+            <span className="today-icon" aria-hidden="true">🤝</span>
+            <span className="today-name">Hold hands</span>
+            <small>{handsLine}</small>
           </button>
-          <button className="today-btn" onClick={duel.pick} disabled={!partnerHere || duel.phase.kind !== 'idle'} data-testid="open-duel">
-            <span className="today-icon" aria-hidden="true">⚔️</span>
-            <span className="today-name">VS</span>
+          <button className="today-btn wide" onClick={duel.pick} disabled={!partnerHere || duel.phase.kind !== 'idle'} data-testid="open-duel">
+            <span className="today-name">🎮 Play</span>
+            <span className="today-games" data-testid="today-games">
+              {playToday.map((g) => <span key={g} className="game-chip">{VS_GAMES[g].icon} {VS_GAMES[g].name}</span>)}
+            </span>
             <small>{duelLine}</small>
           </button>
         </div>
+        {yesterdayProve && <button className="link" onClick={() => open('prove')} data-testid="yesterday-prove">🔍 Yesterday’s Prove It results →</button>}
+        {teaser && <p className="teaser" data-testid="teaser">{teaser}</p>}
       </section>
 
       <InstallCard context="game" />
@@ -383,7 +497,10 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
                 {e.kind === 'same_brain' ? <span>🧠 Same Brain · +3 each</span>
                   : e.kind === 'prove_it' ? <span>🔍 {e.player === me ? 'You' : e.player} proved {PROVE_LEVELS[e.points - 1]?.name} <em>+{e.points}</em></span>
                     : e.kind === 'duel' ? <span>⚔️ {e.player === me ? 'You' : e.player} won VS <em>+{e.points}</em></span>
-                      : <span>{e.player === me ? 'You' : e.player} {'♥'.repeat(e.charge ?? 1)}{e.rally_bonus > 0 && <em> +{e.rally_bonus} rally</em>}</span>}
+                      : e.kind === 'hands' ? <span>🤝 {e.player === me ? 'You' : e.player} held hands <em>+{e.points}</em></span>
+                        : e.kind === 'tot' ? <span>🤔 {e.player === me ? 'You' : e.player} This or That <em>+{e.points}</em></span>
+                          : e.kind === 'rally' ? <span>🪶 {e.player === me ? 'You' : e.player} chapteh rally <em>+{e.points}</em></span>
+                            : <span>{e.player === me ? 'You' : e.player} {'♥'.repeat(e.charge ?? 1)}{e.rally_bonus > 0 && <em> +{e.rally_bonus} rally</em>}{reasonOf(e.reason) && <em className="feed-why"> · {reasonOf(e.reason)!.icon} {reasonOf(e.reason)!.label}</em>}</span>}
                 <time>{ago(now - Date.parse(e.created_at))}</time>
               </li>
             ))}
@@ -392,12 +509,23 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       </section>
 
       <footer className="foot">
-        <p>Hold to charge (up to 3). Answer a miss within 5 min for a rally bonus. Send at the same moment for a Same Brain. Hearts refill every 30 min. Prove It once a day; the first duel win each day is +5. Seasons end Sunday midnight.</p>
+        <p>Hold to charge (up to 3), then tap why. Answer a miss within 5 min for a rally bonus. Send at the same moment for a Same Brain. Hearts refill every 30 min. Prove It and This or That once a day; the first versus win each day is +5; hold hands for up to 5 a day. Seasons end Sunday midnight.</p>
         {backend.refillHearts && <button className="link" onClick={() => { backend.refillHearts!(); refreshStatus() }}>refill my hearts (demo)</button>}
       </footer>
       </>}
 
-      <DuelOverlay duel={duel} demo={backend.kind === 'demo'} />
+      <DuelOverlay duel={duel} demo={backend.kind === 'demo'} lineup={today} />
+      <HoldHands hands={hands} partner={partner} />
+
+      {hands.asked && !hands.open && duel.phase.kind === 'idle' && (
+        <div className="nudge card" role="alert" data-testid="hands-nudge">
+          <p>🤝 <b>{partner}</b> wants to hold hands</p>
+          <div className="pick">
+            <button className="pill" onClick={hands.openScreen}>Hold hands</button>
+            <button className="pill ghost" onClick={hands.dismiss}>Not now</button>
+          </div>
+        </div>
+      )}
 
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone ?? ''}`}>{t.text}</div>)}

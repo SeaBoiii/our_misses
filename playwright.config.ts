@@ -16,7 +16,7 @@ export default defineConfig({
   timeout: 60_000,
   reporter: [['list']],
   projects: [
-    { name: 'demo', testMatch: 'demo.spec.ts', use: { ...browser, baseURL: 'http://127.0.0.1:4179' } },
+    { name: 'demo', testMatch: /(demo|more).spec.ts/, use: { ...browser, baseURL: 'http://127.0.0.1:4179' } },
     { name: 'live-mock', testMatch: 'live.spec.ts', use: { ...browser, baseURL: 'http://127.0.0.1:4180' } },
   ],
   webServer: [

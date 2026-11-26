@@ -1,5 +1,31 @@
-import type { History as HistoryData, Player } from '../game/rules'
+import { reasonOf } from '../game/more'
+import type { History as HistoryData, Player, ReasonCount } from '../game/rules'
 import { weekLabel } from '../lib/format'
+
+/** Each of your top 3 reasons, all time. */
+function WhyBoard({ reasons, me }: { reasons: ReasonCount[]; me: Player }) {
+  if (reasons.length === 0) return null
+  return (
+    <div className="card why-board" data-testid="why-board">
+      <h3>Why you miss each other</h3>
+      <div className="trophy-row">
+        {(['Aleem', 'Nurul'] as const).map((p) => {
+          const top = reasons.filter((r) => r.player === p).slice(0, 3)
+          return (
+            <div key={p} className="why-col">
+              <b>{p}{p === me && ' (you)'}</b>
+              {top.length === 0 ? <small className="muted">no reasons yet</small> : (
+                <ol>
+                  {top.map((r) => <li key={r.reason}>{reasonOf(r.reason)?.icon} {reasonOf(r.reason)?.label} <small>×{r.n}</small></li>)}
+                </ol>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function verdict(r: HistoryData['rows'][number], me: Player) {
   const who = (p: Player) => (p === me ? 'You' : p)
@@ -11,7 +37,7 @@ function verdict(r: HistoryData['rows'][number], me: Player) {
   return `🏆 ${who(r.winner)} missed more`
 }
 
-export function History({ data, me, onBack }: { data: HistoryData; me: Player; onBack(): void }) {
+export function History({ data, me, reasons = [], onBack }: { data: HistoryData; me: Player; reasons?: ReasonCount[]; onBack(): void }) {
   const { rows, trophies, allTime, streak } = data
   const finished = rows.filter((r) => !r.current).length
   return (
@@ -40,6 +66,8 @@ export function History({ data, me, onBack }: { data: HistoryData; me: Player; o
         </p>
       </div>
 
+      <WhyBoard reasons={reasons} me={me} />
+
       {rows.length === 0 ? (
         <p className="muted center-text">No seasons yet. Go miss someone.</p>
       ) : (
@@ -67,7 +95,10 @@ export function History({ data, me, onBack }: { data: HistoryData; me: Player; o
                   {r.longest_rally > 1 && <li>🏓 rally of {r.longest_rally}</li>}
                   {r.aleem_proven + r.nurul_proven > 0 && <li>🔍 {r.aleem_proven} vs {r.nurul_proven} proven</li>}
                   {r.aleem_bluffs + r.nurul_bluffs > 0 && <li>🤥 bluffs {r.aleem_bluffs}–{r.nurul_bluffs}</li>}
-                  {r.aleem_duels + r.nurul_duels > 0 && <li>⚔️ duels {r.aleem_duels}–{r.nurul_duels}</li>}
+                  {r.aleem_duels + r.nurul_duels > 0 && <li>⚔️ versus {r.aleem_duels}–{r.nurul_duels}</li>}
+                  {r.hands > 0 && <li>🤝 held hands +{r.hands}</li>}
+                  {r.tot > 0 && <li>🤔 This or That +{r.tot}</li>}
+                  {r.best_chapteh > 0 && <li>🪶 chapteh rally of {r.best_chapteh}</li>}
                 </ul>
               </li>
             )
