@@ -1,7 +1,11 @@
 // A pretend partner for trying the game without a database. Lives in this browser only.
 // Mirrors the database's rules (supabase/migrations) closely enough to play every mode.
 import type { Backend, Change, Signal } from './backend'
+import {
+  agakScore, cannotDeck, cannotMisses, CANNOT_SWAP_MS, demoHints, HTH_POINTS, hthOfDay, spsState, SPS_THROWS, TARGET_MAX, TARGET_MIN,
+} from '../game/batch1'
 import { proveTarget } from '../game/catch'
+import { AGAK_CARDS } from '../content/agak'
 import { lineupFor, nextDay } from '../game/lineup'
 import {
   flightMs, HANDS_DAILY_CAP, HANDS_SECONDS_PER_MISS, QUIZ_QUESTIONS, QUIZ_SECONDS, quizPoints, RALLY_DAILY_CAP, rallyMisses,
@@ -10,11 +14,13 @@ import {
 import {
   dayKey, DUEL_COUNTDOWN_MS, DUEL_POINTS, emptyWeek, HEART_CAP, heartsAt, partnerOf, PLAYERS, rallyFor,
   sameBrainPartner, spendHeart, VS_LENGTH_MS, vsScore, WEEK_MS, weekKey, weekStartMs, weekTotalsFrom,
-  type Duel, type MissEvent, type Player, type ProveDay, type ProveEntry, type ReasonCount, type SendResult, type TotDay,
-  type TotEntry, type VsGame, type WeekTotal,
+  type AgakRound, type Duel, type HthDay, type HthEntry, type MissEvent, type Player, type ProveDay, type ProveEntry,
+  type ReasonCount, type SendResult, type SpsThrow, type TotDay, type TotEntry, type VsGame, type WeekTotal,
 } from '../game/rules'
 
 interface TotRow { question: string; mine: number; guess: number; settled: boolean }
+interface HthRow { question: string; answer: string }
+interface AgakRow { psychic: Player; card: string; target: number; clue: string | null; needle: number | null; score: number | null }
 
 interface ProveRow { level: number; started_at: number; finished_at: number | null; score: number | null; passed: boolean | null; settled: boolean }
 interface DuelRow {
@@ -38,13 +44,16 @@ interface DemoSave {
   prove?: Record<string, Partial<Record<Player, ProveRow>>>
   duels?: DuelRow[]
   tot?: Record<string, Partial<Record<Player, TotRow>>>
+  hth?: Record<string, Partial<Record<Player, HthRow>>>
+  agak?: Record<string, AgakRow>
+  sps?: Record<number, Record<Player, SpsThrow[]>>
 }
 const KEY = 'our_misses_demo_v1'
 // Test switches: ?samebrain makes the pretend partner always miss you at the same moment;
 // ?quiet keeps her from sending or playing anything on her own (she still answers VS games,
 // This or That and Hold hands, but plays them slowly); ?duelme / ?pourme / ?quizme / ?chaptehme
 // make her challenge you right away; ?handsme makes her ask to hold hands; ?fastbot makes her
-// solve a Pour-off in 12 seconds.
+// solve a Pour-off in 12 seconds. ?kopime / ?spsme / ?cannotme challenge you to the batch 1 games.
 const params = new URLSearchParams(location.search)
 const QUIET = params.has('quiet')
 // ?allgames turns the daily rotation off; ?lineupday=YYYY-MM-DD plays as if it were that day.
@@ -95,9 +104,15 @@ export function demoBackend(me: Player): Backend {
   save.prove ??= {}
   save.duels ??= []
   save.tot ??= {}
+  save.hth ??= {}
+  save.agak ??= {}
+  save.sps ??= {}
   const prove = save.prove
   const duels = save.duels
   const tot = save.tot
+  const hth = save.hth
+  const agak = save.agak
+  const sps = save.sps
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)) } catch { /* ignore */ } }
   let onEvent: ((e: MissEvent, change: Change) => void) | null = null
   let onPresence: ((here: Player[]) => void) | null = null
@@ -116,7 +131,7 @@ export function demoBackend(me: Player): Backend {
     return { hearts, next_at: nextAt === null ? null : new Date(nextAt).toISOString() }
   }
 
-  function record(player: Player, kind: 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally', points: number, t: number) {
+  function record(player: Player, kind: 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally' | 'hth' | 'agak' | 'cannot', points: number, t: number) {
     const e: MissEvent = { id: save.nextId++, player, kind, charge: null, rally_length: null, rally_bonus: 0, points, ref_id: null, created_at: new Date(t).toISOString(), reason: null }
     save.events.push(e)
     later(0, () => onEvent?.(e, 'insert'))
@@ -167,8 +182,19 @@ export function demoBackend(me: Player): Backend {
   // ---- settling, as our_misses_private.settle does ----------------------------------
   function settleDuel(d: DuelRow, t: number) {
     if (d.settled_at !== null) return
-    const a = d.aleem_score ?? 0
-    const n = d.nurul_score ?? 0
+    const throws = sps[d.id] ?? { Aleem: [], Nurul: [] }
+    // Scissors-Paper-Stone is scored from the throws, never from what a phone says.
+    const a = d.game === 'sps' ? spsState(throws.Aleem, throws.Nurul).mine : d.aleem_score ?? 0
+    const n = d.game === 'sps' ? spsState(throws.Nurul, throws.Aleem).mine : d.nurul_score ?? 0
+    if (d.game === 'cannot') {
+      const words = Math.min(a, n)
+      Object.assign(d, { aleem_score: a, nurul_score: n, winner: 'tie', points: 0, settled_at: t })
+      for (const p of PLAYERS) {
+        const earned = cannotMisses(words, todayPoints(p, 'cannot', t))
+        if (earned > 0) record(p, 'cannot', earned, t)
+      }
+      return
+    }
     if (d.game === 'chapteh') {
       // Together: nobody wins; the rally counts as far as both phones agree.
       const rally = Math.min(a, n)
@@ -249,7 +275,7 @@ export function demoBackend(me: Player): Backend {
   const scoreKey = (p: Player): 'aleem_score' | 'nurul_score' => (p === 'Aleem' ? 'aleem_score' : 'nurul_score')
 
   const lineupDay = () => LINEUP_DAY ?? dayKey(Date.now())
-  const onToday = (game: string) => ALL_GAMES || (game === 'prove' || game === 'tot' ? lineupFor(lineupDay()).daily === game : lineupFor(lineupDay()).play.includes(game as VsGame))
+  const onToday = (game: string) => ALL_GAMES || (['prove', 'tot', 'hth', 'agak'].includes(game) ? lineupFor(lineupDay()).daily === game : lineupFor(lineupDay()).play.includes(game as VsGame))
 
   function startDuel(by: Player, game: VsGame) {
     const t = Date.now()
@@ -301,6 +327,23 @@ export function demoBackend(me: Player): Backend {
       }
       return
     }
+    if (d.game === 'kopi') {
+      // She serves a drink every few seconds and gets most of them right.
+      let drinks = 0
+      const serve = () => {
+        if (d.settled_at !== null) return
+        if (Date.now() >= end) {
+          later(600 + Math.random() * 600, () => { report(d, partner, drinks, false, Date.now()); onSignal?.({ type: 'duel_done', id: d.id }) })
+          return
+        }
+        if (Math.random() < (QUIET ? 0.5 : 0.85)) { drinks++; onSignal?.({ type: 'duel_progress', value: drinks }) }
+        later(QUIET ? 8_000 + Math.random() * 2_000 : 3_500 + Math.random() * 2_500, serve)
+      }
+      later(Math.max(0, d.starts_at - Date.now()) + 3_000, serve)
+      return
+    }
+    if (d.game === 'sps') return // she throws when you do (see spsThrow)
+    if (d.game === 'cannot') { cannotBot(d); return }
     if (d.game === 'tug') {
       const rate = QUIET ? 3 : 5.5 + Math.random() * 3
       const tapsAt = (t: number) => Math.max(0, Math.floor((rate * Math.min(VS_LENGTH_MS.tug, t - d.starts_at)) / 1000))
@@ -342,6 +385,137 @@ export function demoBackend(me: Player): Backend {
       later(1000, tick)
     }
     tick()
+  }
+
+  // ---- Cannot Say!: she guesses your clues, and gives her own when it's her turn ----------
+  interface CannotBot { got: Set<number>; index: [number, number]; clues: Map<number, number> }
+  const cannotBots = new Map<number, CannotBot>()
+  const halfOf = (card: number) => (card >= 100 ? 1 : 0)
+  function cannotBot(d: DuelRow) {
+    const deck = cannotDeck(d.seed)
+    const st: CannotBot = { got: new Set(), index: [0, 100], clues: new Map() }
+    cannotBots.set(d.id, st)
+    const end = d.starts_at + VS_LENGTH_MS.cannot
+    // Whoever sent the challenge describes first: that's her when you accepted it.
+    const herHalf = d.started_by === me ? 0 : 1
+    const describe = () => {
+      const t = Date.now()
+      const from = d.starts_at + herHalf * CANNOT_SWAP_MS
+      if (d.settled_at !== null || t >= Math.min(end, from + CANNOT_SWAP_MS)) return
+      if (t < from) { later(from - t + 1_200, describe); return }
+      const card = st.index[herHalf]
+      const given = st.clues.get(card) ?? 0
+      const hints = demoHints(deck[card])
+      if (given < hints.length) {
+        st.clues.set(card, given + 1)
+        onSignal?.({ type: 'cannot_clue', card, text: hints[given] })
+      } else {
+        st.index[herHalf] = card + 1
+        onSignal?.({ type: 'cannot_pass', card })
+      }
+      later(QUIET ? 7_000 : 4_000 + Math.random() * 2_000, describe)
+    }
+    describe()
+    later(Math.max(0, end - Date.now()) + 900, () => {
+      report(d, partner, st.got.size, false, Date.now())
+      onSignal?.({ type: 'duel_done', id: d.id })
+    })
+  }
+  function cannotHeard(s: Signal) {
+    const d = duels.find((x) => x.settled_at === null && x.game === 'cannot')
+    const st = d && cannotBots.get(d.id)
+    if (!d || !st || !('card' in s)) return
+    const h = halfOf(s.card)
+    if (s.type === 'cannot_got' || s.type === 'cannot_pass') {
+      if (s.type === 'cannot_got') st.got.add(s.card)
+      st.index[h] = Math.max(st.index[h], s.card + 1)
+      return
+    }
+    if (s.type !== 'cannot_clue') return
+    // Your clue: she has a think, then gets it or has a go.
+    const n = (st.clues.get(s.card) ?? 0) + 1
+    st.clues.set(s.card, n)
+    later(1_500 + Math.random() * 1_500, () => {
+      if (d.settled_at !== null || st.index[h] !== s.card || (st.clues.get(s.card) ?? 0) !== n) return
+      const deck = cannotDeck(d.seed)
+      if (Math.random() < (QUIET ? 0.3 : 0.4 + 0.2 * n)) {
+        st.got.add(s.card)
+        st.index[h] = s.card + 1
+        onSignal?.({ type: 'cannot_got', card: s.card })
+      } else {
+        onSignal?.({ type: 'cannot_guess', card: s.card, text: deck[(s.card + 37) % deck.length].word })
+      }
+    })
+  }
+
+  // ---- Scissors-Paper-Stone ---------------------------------------------------------
+  function spsOf(d: DuelRow) {
+    sps[d.id] ??= { Aleem: [], Nurul: [] }
+    return sps[d.id]
+  }
+
+  // ---- Heart to Heart ---------------------------------------------------------------
+  const PRETEND_ANSWERS = [
+    'Honestly? You, every single time.',
+    'The night we shared one umbrella and both still got soaked.',
+    'Probably the way you laugh at your own jokes before the punchline.',
+    'Supper at the hawker centre after a long, long day.',
+    'Less planning, more wandering. With you, obviously.',
+  ]
+  function hthDay(day: string): HthDay {
+    const rows = hth[day] ?? {}
+    const revealed = Boolean(rows.Aleem && rows.Nurul)
+    const entry = (p: Player): HthEntry | null => {
+      const r = rows[p]
+      if (!r) return null
+      if (p !== me && !revealed) return { answered: true }
+      return { question: r.question, answer: r.answer }
+    }
+    return { day, revealed, Aleem: entry('Aleem'), Nurul: entry('Nurul') }
+  }
+  const hthStatus = () => {
+    const t = Date.now()
+    return { now: new Date(t).toISOString(), day: dayKey(t), today: hthDay(dayKey(t)) }
+  }
+  function settleHth(day: string, t: number) {
+    if (!hth[day]?.Aleem || !hth[day]?.Nurul) return
+    for (const p of PLAYERS) record(p, 'hth', HTH_POINTS, t)
+  }
+
+  // ---- Agak Agak --------------------------------------------------------------------
+  const agakJson = (day: string, r: AgakRow | undefined): AgakRound | null => r ? {
+    day, psychic: r.psychic, card: r.card, clue: r.clue, needle: r.needle, score: r.score,
+    target: r.psychic === me || r.needle !== null ? r.target : null,
+  } : null
+  function agakScoreIt(day: string, needle: number) {
+    const r = agak[day]
+    r.needle = Math.round(needle * 100) / 100
+    r.score = agakScore(r.target, r.needle)
+    if (r.score > 0) for (const p of PLAYERS) record(p, 'agak', r.score, Date.now())
+    persist()
+  }
+  function pretendClue(target: number) {
+    const where = target < 45 ? 'Way over on the left' : target < 80 ? 'Left of the middle' : target <= 100 ? 'Smack in the middle' : target < 135 ? 'Right of the middle' : 'Way over on the right'
+    return `${where} (pretend clue)`
+  }
+  function agakStatus() {
+    const t = Date.now()
+    const day = dayKey(t)
+    if (!agak[day] && onToday('agak')) {
+      const lastPsychic = Object.keys(agak).filter((x) => x < day).sort().map((x) => agak[x].psychic).pop()
+      const psychic: Player = lastPsychic === 'Aleem' ? 'Nurul' : 'Aleem'
+      agak[day] = {
+        psychic, card: `agak-${1 + Math.floor(Math.random() * AGAK_CARDS.length)}`,
+        target: Math.round((TARGET_MIN + Math.random() * (TARGET_MAX - TARGET_MIN)) * 100) / 100,
+        clue: null, needle: null, score: null,
+      }
+      persist()
+      if (psychic === partner) {
+        later(QUIET ? 3_000 : 1_500, () => { agak[day].clue = pretendClue(agak[day].target); persist(); onSignal?.({ type: 'agak_moved' }) })
+      }
+    }
+    const lastDay = Object.keys(agak).filter((x) => x < day && agak[x].needle !== null).sort().pop()
+    return { now: new Date(t).toISOString(), day, today: agakJson(day, agak[day]), last: lastDay ? agakJson(lastDay, agak[lastDay]) : null }
   }
 
   // ---- This or That ----------------------------------------------------------------
@@ -498,6 +672,95 @@ export function demoBackend(me: Player): Backend {
       await pause(60)
       return Object.keys(tot).filter((d) => tot[d]?.Aleem && tot[d]?.Nurul).sort().reverse().map(totDay)
     },
+    async hthToday() {
+      await pause(60)
+      return hthStatus()
+    },
+    async hthAnswer(question, answer) {
+      await pause()
+      const t = Date.now()
+      const day = dayKey(t)
+      const text = answer.trim()
+      if (text.length < 1 || text.length > 600) throw new Error('write 1 to 600 characters')
+      if (!onToday('hth')) throw new Error('Heart to Heart is not on today')
+      if (hth[day]?.[me]) throw new Error('already answered today')
+      hth[day] = { ...hth[day], [me]: { question, answer: text } }
+      persist()
+      if (!hth[day]?.[partner]) {
+        later(QUIET ? 4_000 : 2_000, () => {
+          if (hth[day]?.[partner]) return
+          hth[day] = { ...hth[day], [partner]: { question: hthOfDay(day).id, answer: PRETEND_ANSWERS[Math.floor(Math.random() * PRETEND_ANSWERS.length)] } }
+          settleHth(day, Date.now())
+          persist()
+          onSignal?.({ type: 'hth_answered' })
+        })
+      } else settleHth(day, t)
+      return hthStatus()
+    },
+    async hthAlbum() {
+      await pause(60)
+      return Object.keys(hth).filter((d) => hth[d]?.Aleem && hth[d]?.Nurul).sort().reverse().map(hthDay)
+    },
+    async agakToday() {
+      await pause(60)
+      return agakStatus()
+    },
+    async agakClue(clue) {
+      await pause()
+      const day = dayKey(Date.now())
+      const r = agak[day]
+      const text = clue.trim()
+      if (text.length < 1 || text.length > 80) throw new Error('a clue is 1 to 80 characters')
+      if (!r || r.psychic !== me || r.clue !== null) throw new Error('only today’s Psychic can give one clue')
+      r.clue = text
+      persist()
+      // She sets the needle after a think, usually close.
+      later(QUIET ? 5_000 : 2_500, () => {
+        if (agak[day].needle !== null) return
+        const spread = QUIET ? 40 : 24
+        agakScoreIt(day, Math.min(180, Math.max(0, r.target + (Math.random() - 0.5) * spread)))
+        onSignal?.({ type: 'agak_moved' })
+      })
+      return agakStatus()
+    },
+    async agakGuess(needle) {
+      await pause()
+      const day = dayKey(Date.now())
+      const r = agak[day]
+      if (!(needle >= 0 && needle <= 180)) throw new Error('the needle goes from 0 to 180')
+      if (!r || r.psychic === me || r.clue === null || r.needle !== null) throw new Error('nothing to guess yet')
+      agakScoreIt(day, needle)
+      return agakStatus()
+    },
+    async spsThrow(id, round, hand) {
+      await pause(80)
+      const t = Date.now()
+      const d = duels.find((x) => x.id === id && x.game === 'sps')
+      if (!d || d.settled_at !== null || t < d.starts_at || t > d.starts_at + VS_LENGTH_MS.sps) throw new Error('no game to throw in')
+      const st = spsOf(d)
+      const now = spsState(st[me], st[partner])
+      if (now.over || round !== now.next) throw new Error('not that round')
+      if (st[partner].length < round - 1) throw new Error('wait for the other throw')
+      st[me].push(hand)
+      persist()
+      if (st[partner].length < round) {
+        later(QUIET ? 2_500 : 600 + Math.random() * 1_000, () => {
+          if (d.settled_at !== null || st[partner].length >= round) return
+          st[partner].push(SPS_THROWS[Math.floor(Math.random() * 3)])
+          persist()
+          onSignal?.({ type: 'sps_thrown', round })
+          if (spsState(st[partner], st[me]).over) later(300, () => { report(d, partner, 0, false, Date.now()); onSignal?.({ type: 'duel_done', id: d.id }) })
+        })
+      }
+      return spsState(st[me], st[partner])
+    },
+    async spsGet(id) {
+      await pause(60)
+      const d = duels.find((x) => x.id === id && x.game === 'sps')
+      if (!d) throw new Error('no such game')
+      const st = spsOf(d)
+      return spsState(st[me], st[partner])
+    },
     async proveToday() {
       await pause(60)
       return proveStatus()
@@ -539,6 +802,12 @@ export function demoBackend(me: Player): Backend {
         if ((d.game === 'pour' || d.game === 'chapteh') && t < d.starts_at) throw new Error('the race is not over yet')
         if ((d.game === 'quiz' || d.game === 'mrt') && t < d.starts_at + 7_000) throw new Error('the quiz is not over yet')
         if (d.game === 'pour' && solved && t < d.starts_at + 8_000) throw new Error('too fast to be true')
+        if (d.game === 'kopi' && t < d.starts_at + 55_000) throw new Error('the shift is not over yet')
+        if (d.game === 'cannot' && t < d.starts_at + 85_000) throw new Error('the round is not over yet')
+        if (d.game === 'sps' && t < d.starts_at + VS_LENGTH_MS.sps) {
+          const st = spsOf(d)
+          if (!spsState(st[me], st[partner]).over) throw new Error('the match is not over yet')
+        }
         report(d, me, value, solved, t)
       }
       return duelJson(d)
@@ -571,6 +840,7 @@ export function demoBackend(me: Player): Backend {
         if (d) later(1_500, () => { report(d, partner, botBottles.get(d.id)?.() ?? 0, false, Date.now()); onSignal?.({ type: 'duel_done', id: d.id }) })
       }
       if (s.type === 'chapteh_kick') partnerKicksBack(s.kicks, s.ms)
+      if (s.type === 'cannot_clue' || s.type === 'cannot_got' || s.type === 'cannot_pass') cannotHeard(s)
       if (s.type === 'chapteh_drop') {
         const d = duels.find((x) => x.settled_at === null && x.game === 'chapteh')
         if (d) later(500, () => { report(d, partner, s.kicks, false, Date.now()); onSignal?.({ type: 'duel_done', id: d.id }) })
@@ -601,6 +871,9 @@ export function demoBackend(me: Player): Backend {
       if (params.has('quizme')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'quiz' }))
       if (params.has('mrtme')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'mrt' }))
       if (params.has('chaptehme')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'chapteh' }))
+      if (params.has('kopime')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'kopi' }))
+      if (params.has('spsme')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'sps' }))
+      if (params.has('cannotme')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'cannot' }))
       if (params.has('handsme')) later(2_500, () => { handsOpen = true; onSignal?.({ type: 'hands', state: 'open' }) })
       wanderLoop()
       return () => {

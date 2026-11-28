@@ -3,8 +3,8 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { Backend, Signal } from './backend'
 import type { Lineups } from '../game/lineup'
 import {
-  NoHeartsError, type Duel, type MissEvent, type Player, type ProveStart, type ProveStatus, type ReasonCount, type SendResult,
-  type Status, type TotDay, type TotStatus, type WeekTotal,
+  NoHeartsError, type AgakStatus, type Duel, type HthDay, type HthStatus, type MissEvent, type Player, type ProveStart,
+  type ProveStatus, type ReasonCount, type SendResult, type SpsState, type Status, type TotDay, type TotStatus, type WeekTotal,
 } from '../game/rules'
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -70,6 +70,14 @@ export async function liveBackend(): Promise<Backend> {
     totToday: () => call<TotStatus>('our_misses_tot_today'),
     totAnswer: (question, mine, guess) => call<TotStatus>('our_misses_tot_answer', { p_question: question, p_mine: mine, p_guess: guess }),
     totAlbum: () => call<TotDay[]>('our_misses_tot_album', { p_limit: 60 }),
+    hthToday: () => call<HthStatus>('our_misses_hth_today'),
+    hthAnswer: (question, answer) => call<HthStatus>('our_misses_hth_answer', { p_question: question, p_answer: answer }),
+    hthAlbum: () => call<HthDay[]>('our_misses_hth_album', { p_limit: 60 }),
+    agakToday: () => call<AgakStatus>('our_misses_agak_today'),
+    agakClue: (clue) => call<AgakStatus>('our_misses_agak_clue', { p_clue: clue }),
+    agakGuess: (needle) => call<AgakStatus>('our_misses_agak_guess', { p_needle: Math.round(needle * 100) / 100 }),
+    spsThrow: (id, round, hand) => call<SpsState>('our_misses_sps_throw', { p_id: id, p_round: round, p_throw: hand }),
+    spsGet: (id) => call<SpsState>('our_misses_sps_get', { p_id: id }),
     proveToday: () => call<ProveStatus>('our_misses_prove_today'),
     proveStart: (level) => call<ProveStart>('our_misses_prove_start', { p_level: level }),
     proveFinish: (score) => call<ProveStatus>('our_misses_prove_finish', { p_score: score }),

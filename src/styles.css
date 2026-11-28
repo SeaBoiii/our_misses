@@ -401,6 +401,8 @@ button.banner:active { transform: translate(1px, 1px); }
   width: min(100%, 360px); background: var(--paper); border: 3px solid var(--line); border-radius: 24px;
   box-shadow: 6px 6px 0 var(--line); padding: 18px; display: flex; flex-direction: column; gap: 12px; text-align: center;
   animation: pop 0.4s cubic-bezier(.3, 1.6, .5, 1);
+  /* A long game list (or a small phone) scrolls inside the card instead of off the screen. */
+  max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain;
 }
 .duel-card.wide { width: min(100%, 420px); }
 .duel-title { font-size: 22px; font-weight: 700; }
@@ -576,3 +578,94 @@ button.banner:active { transform: translate(1px, 1px); }
 .game-chip { background: var(--paper); border: 2px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 13.5px; font-weight: 600; }
 .teaser { margin-top: 8px; font-size: 13px; color: var(--ink-soft); text-align: center; }
 .today .link { display: block; margin: 6px auto 0; }
+
+/* Text boxes and sliders */
+textarea.field {
+  font: inherit; font-size: 16px; color: var(--ink); background: var(--bg); width: 100%;
+  border: 2px solid var(--line); border-radius: 12px; padding: 11px 12px; resize: vertical; line-height: 1.4;
+}
+textarea.field:focus-visible { outline: 3px solid var(--aleem); outline-offset: 1px; }
+input[type='range'] { padding: 0; border: none; background: none; accent-color: var(--heart); width: 100%; }
+.today-btn small.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Heart to Heart */
+.hth-deck { align-self: flex-start; }
+.hth-q { font-size: 20px; font-weight: 700; line-height: 1.3; }
+.hth-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.hth-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hth-answer { border: 2px solid var(--line); border-radius: 16px; padding: 10px; background: var(--bg); display: flex; flex-direction: column; gap: 4px; }
+.hth-answer p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.35; }
+.hth-answer.mine { background: var(--aleem-tint); }
+.hth-answer.theirs { background: var(--nurul-tint); }
+.hth-album li { grid-template-columns: 1fr auto; }
+.hth-album .hth-pair { grid-column: 1 / -1; margin-top: 4px; }
+@media (max-width: 360px) { .hth-pair { grid-template-columns: 1fr; } }
+
+/* Agak Agak */
+.agak-card { align-items: stretch; }
+.agak-clue { font-size: 21px; font-weight: 700; text-align: center; overflow-wrap: anywhere; }
+.agak-dial svg { width: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
+.agak-dial svg.draggable { cursor: grab; }
+.agak-face { fill: var(--paper); stroke: var(--line); stroke-width: 2.5; }
+.agak-band { stroke: var(--line); stroke-width: 1; }
+.agak-band.b2 { fill: #ffd98a; }
+.agak-band.b3 { fill: #ff9f6e; }
+.agak-band.b4 { fill: var(--heart); }
+.agak-needle { stroke: var(--ink); stroke-width: 4; stroke-linecap: round; }
+.agak-hub { fill: var(--ink); }
+.agak-ends { display: flex; justify-content: space-between; gap: 10px; font-weight: 600; font-size: 14px; margin-top: 4px; }
+.agak-ends span:last-child { text-align: right; }
+
+/* Kopi Rush */
+.kopi { display: flex; flex-direction: column; gap: 10px; }
+.kopi-order { display: flex; align-items: center; gap: 10px; text-align: left; }
+.kopi-who { font-size: 40px; line-height: 1; }
+.kopi-bubble { flex: 1; background: var(--gold); border: 2.5px solid var(--line); border-radius: 18px 18px 18px 4px; padding: 10px 12px; font-size: 19px; font-weight: 700; line-height: 1.25; }
+.kopi-flash { font-weight: 700; border-radius: 12px; padding: 4px 10px; animation: pop 0.35s ease-out; }
+.kopi-flash.good { background: #d5f5e3; color: #14301f; }
+.kopi-flash.bad { background: var(--heart-tint); }
+.kopi-cup { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; min-height: 30px; align-items: center; }
+.kopi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.kopi-ing {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px;
+  border: 2px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: 2px 2px 0 var(--line);
+  font-size: 24px; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.kopi-ing small { font-size: 10.5px; font-weight: 600; line-height: 1.1; }
+.kopi-ing:active { transform: translate(2px, 2px); box-shadow: none; }
+.kopi-count { position: absolute; top: -7px; right: -5px; background: var(--heart); color: #fff; border: 2px solid var(--line); border-radius: 999px; font-size: 12px; min-width: 22px; line-height: 18px; }
+.kopi-tally { font-weight: 700; }
+.kopi-glossary { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; text-align: left; font-size: 13px; }
+.kopi-glossary dt { font-weight: 700; }
+.kopi-glossary dd { margin: 0; color: var(--ink-soft); }
+
+/* Scissors-Paper-Stone */
+.sps { display: flex; flex-direction: column; gap: 12px; }
+.sps-reveal { min-height: 86px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 14px; animation: pop 0.4s cubic-bezier(.3, 1.6, .5, 1); }
+.sps-reveal p { flex-basis: 100%; font-weight: 700; }
+.sps-reveal.me p { color: var(--good); }
+.sps-reveal.them p { color: var(--heart); }
+.sps-hand { font-size: 52px; line-height: 1; }
+.sps-vs { font-weight: 700; color: var(--ink-soft); }
+.sps-round { font-weight: 600; }
+.sps-throws { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sps-throw {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 14px 4px; font-size: 40px;
+  border: 2.5px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 3px 3px 0 var(--line);
+  touch-action: manipulation;
+}
+.sps-throw small { font-size: 13px; font-weight: 600; }
+.sps-throw:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--line); }
+
+/* Cannot Say! */
+.cannot { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.cannot-words { font-weight: 700; color: var(--heart); }
+.cannot-card { border: 3px solid var(--line); border-radius: 18px; padding: 12px; background: var(--bg); display: flex; flex-direction: column; gap: 6px; }
+.cannot-card .quiz-cat { align-self: flex-start; }
+.cannot-word { font-size: 28px; font-weight: 800; line-height: 1.1; }
+.cannot-banned { font-size: 14px; display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.cannot-banned s { color: var(--heart); font-weight: 600; }
+.cannot-clues { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 18px; font-weight: 600; }
+.cannot-form { display: flex; gap: 8px; }
+.cannot-form input { flex: 1; min-width: 0; }
+.cannot-warn { color: var(--heart); font-weight: 700; animation: shake 0.08s linear 4; }

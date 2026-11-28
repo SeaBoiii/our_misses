@@ -66,6 +66,24 @@ async function mockProject(page: Page, opts: { member?: boolean; hearts?: number
       mine = { ...mine, finished: true, score: body.p_score, passed: body.p_score >= 6 }
       return json(route, proveStatus())
     }
+    const hthDay = (Aleem: unknown) => ({ now: now(), day: today, today: { day: today, revealed: false, Aleem, Nurul: { answered: true } } })
+    if (path === '/rest/v1/rpc/our_misses_hth_today') return json(route, hthDay(null))
+    if (path === '/rest/v1/rpc/our_misses_hth_album') return json(route, [])
+    if (path === '/rest/v1/rpc/our_misses_hth_answer') {
+      const body = route.request().postDataJSON()
+      proveCalls.push({ fn: 'hth', body })
+      return json(route, hthDay({ question: body.p_question, answer: body.p_answer }))
+    }
+    const agakRound = (needle: number | null) => ({
+      day: today, psychic: 'Nurul', card: 'agak-1', clue: 'char kway teow at midnight', needle,
+      score: needle === null ? null : 3, target: needle === null ? null : 50,
+    })
+    if (path === '/rest/v1/rpc/our_misses_agak_today') return json(route, { now: now(), day: today, today: agakRound(null), last: null })
+    if (path === '/rest/v1/rpc/our_misses_agak_guess') {
+      const body = route.request().postDataJSON()
+      proveCalls.push({ fn: 'agak', body })
+      return json(route, { now: now(), day: today, today: agakRound(body.p_needle), last: null })
+    }
     if (path === '/rest/v1/rpc/our_misses_send') {
       const body = route.request().postDataJSON()
       sent.push(body)
@@ -214,4 +232,32 @@ test('the Today card follows the database’s daily lineup', async ({ page }) =>
   await expect(page.getByTestId('open-prove')).toHaveCount(0)
   await expect(page.getByTestId('today-games')).toHaveText(/Pour-off.*Next Stop.*Chapteh/)
   await expect(page.getByTestId('teaser')).toHaveText('Tomorrow: 🔍 Prove It · 🪢 🧪 🧠')
+})
+
+test('Heart to Heart and Agak Agak go through their RPCs', async ({ page }) => {
+  const mock = await mockProject(page, {
+    lineup: {
+      today: { day: '2026-11-27', daily: 'hth', play: ['kopi', 'sps', 'tug', 'cannot'] },
+      tomorrow: { day: '2026-11-28', daily: 'agak', play: ['pour', 'mrt', 'quiz', 'chapteh'] },
+    },
+  })
+  await signIn(page)
+  await expect(page.getByTestId('today-games')).toHaveText(/Tug of war.*Kopi Rush.*Scissors-Paper-Stone.*Cannot Say!/)
+  await expect(page.getByTestId('teaser')).toHaveText('Tomorrow: 🎯 Agak Agak · 🧪 🚇 🧠 🪶')
+  await page.getByTestId('open-hth').click()
+  await expect(page.getByTestId('hth-input')).toBeVisible()
+  await expect(page.locator('.hth-card')).toContainText('Nurul has already answered')
+  await page.getByTestId('hth-input').fill('  Your voice notes.  ')
+  await page.getByTestId('hth-send').click()
+  await expect(page.getByTestId('hth-waiting')).toContainText('Your voice notes.')
+  const hth = mock.proveCalls.find((c) => c.fn === 'hth')?.body as { p_question: string; p_answer: string }
+  expect(hth.p_question).toMatch(/^(laughs|know|story|closer|life|us)-\d\d$/)
+  expect(hth.p_answer).toBe('  Your voice notes.  ') // the database trims
+  // Agak Agak is still reachable by its address on another day; the database decides.
+  await page.goto('/#agak')
+  await expect(page.getByTestId('agak-their-clue')).toContainText('char kway teow at midnight')
+  await page.getByTestId('agak-needle').fill('47.5')
+  await page.getByTestId('agak-lock').click()
+  await expect(page.getByTestId('agak-reveal')).toContainText('So close!')
+  expect(mock.proveCalls.find((c) => c.fn === 'agak')?.body).toEqual({ p_needle: 47.5 })
 })

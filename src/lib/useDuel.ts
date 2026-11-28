@@ -40,6 +40,12 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
   const [rally, setRallyState] = useState<Rally>(NO_RALLY)
   const rallyRef = useRef<Rally>(NO_RALLY)
   const setRally = useCallback((r: Rally) => { rallyRef.current = r; setRallyState(r) }, [])
+  /** Game screens (Scissors-Paper-Stone, Cannot Say!) listen for their own signals. */
+  const listeners = useRef(new Set<(s: Signal) => void>())
+  const listen = useCallback((fn: (s: Signal) => void) => {
+    listeners.current.add(fn)
+    return () => { listeners.current.delete(fn) }
+  }, [])
   const phaseRef = useRef(phase)
   const mineRef = useRef(0)
   const solvedRef = useRef(false)
@@ -121,7 +127,13 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
       go({ kind: 'reporting', duel })
     }
   }
-  /** Pour-off: stop now and report the bottles completed. */
+  /** Kopi Rush drinks, Scissors-Paper-Stone wins, Cannot Say! words: the score so far. */
+  const setScore = (value: number) => {
+    if (phaseRef.current.kind !== 'live') return
+    mineRef.current = value
+    setMine(value)
+  }
+  /** Pour-off: stop now and report the bottles completed. (Also ends a finished match early.) */
   const giveUp = () => {
     const p = phaseRef.current
     if (p.kind === 'live') go({ kind: 'reporting', duel: p.duel })
@@ -166,6 +178,7 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
   }
 
   const onSignal = useCallback((s: Signal) => {
+    listeners.current.forEach((fn) => fn(s))
     const p = phaseRef.current
     if (s.type === 'duel_invite' && p.kind === 'idle') { sfx.receive(); go({ kind: 'invited', game: s.game, until: Date.now() + offsetRef.current + INVITE_MS }) }
     if (s.type === 'duel_decline' && p.kind === 'inviting') { toast(`${partner} said not now`, 'warn'); go({ kind: 'idle' }) }
@@ -263,6 +276,7 @@ export function useDuel({ backend, offset, toast }: { backend: Backend; offset: 
   return {
     phase, mine, theirs, theirsSolved, iSolved, rally, me, partner, quizProgress, serve, kick,
     pick, invite, cancel, accept, decline, close, tap, pourProgress, giveUp, onSignal, serverNow,
+    setScore, listen, backend,
   }
 }
 

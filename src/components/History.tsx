@@ -99,6 +99,9 @@ export function History({ data, me, reasons = [], onBack }: { data: HistoryData;
                   {r.hands > 0 && <li>🤝 held hands +{r.hands}</li>}
                   {r.tot > 0 && <li>🤔 This or That +{r.tot}</li>}
                   {r.best_chapteh > 0 && <li>🪶 chapteh rally of {r.best_chapteh}</li>}
+                  {r.hth > 0 && <li>💬 Heart to Heart +{r.hth}</li>}
+                  {r.agak > 0 && <li>🎯 Agak Agak +{r.agak}</li>}
+                  {r.cannot > 0 && <li>🙊 Cannot Say! +{r.cannot}</li>}
                 </ul>
               </li>
             )

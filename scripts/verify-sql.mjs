@@ -111,21 +111,30 @@ try {
 
   // ---- The daily lineup: only today's games can be started ---------------------------
   const lineup = (await db.query('select public.our_misses_lineup() as r')).rows[0].r
-  assert.deepEqual(lineup.today, { day: '2026-11-22', daily: 'tot', play: ['tug', 'mrt', 'quiz'] })
-  assert.deepEqual(lineup.tomorrow, { day: '2026-11-23', daily: 'prove', play: ['tug', 'quiz', 'chapteh'] })
-  await fails('select public.our_misses_prove_start(3)', [], 'P0001') // a This or That day
-  await fails("select public.our_misses_duel_start('pour')", [], 'P0001') // not in today's three
+  assert.deepEqual(lineup.today, { day: '2026-11-22', daily: 'agak', play: ['quiz', 'tug', 'pour', 'cannot'] })
+  assert.deepEqual(lineup.tomorrow, { day: '2026-11-23', daily: 'prove', play: ['sps', 'quiz', 'pour', 'chapteh'] })
+  await fails('select public.our_misses_prove_start(3)', [], 'P0001') // an Agak Agak day
+  await fails("select public.our_misses_hth_answer('know-01', 'you')", [], 'P0001')
+  await fails("select public.our_misses_duel_start('mrt')", [], 'P0001') // not in today's four
   await at(T0 + 15 * 60_000) // Monday 00:05: a Prove It day now
   await fails("select public.our_misses_tot_answer('tot-1', 0, 0)", [], 'P0001')
-  await fails("select public.our_misses_duel_start('mrt')", [], 'P0001')
-  // Ten days, each with one daily game and three different play games; never yesterday's set.
+  await fails("select public.our_misses_duel_start('kopi')", [], 'P0001')
+  assert.equal((await db.query('select public.our_misses_agak_today() as r')).rows[0].r.today, null, 'No round is dealt on other days.')
+  // 28 days: one daily game, three versus games and one together game each day; never
+  // yesterday's daily game or versus three; every daily game 7 times, every play game 14.
   await as(null)
-  const cycle = (await db.query("select our_misses_private.lineup(date '2026-11-22' + n) as l from generate_series(0, 10) n")).rows.map((r) => r.l)
-  for (let i = 1; i < cycle.length; i++) {
-    assert.notDeepEqual([...cycle[i].play].sort(), [...cycle[i - 1].play].sort())
-    assert.notEqual(cycle[i].daily, cycle[i - 1].daily)
-    assert.equal(new Set(cycle[i].play).size, 3)
+  const cycle = (await db.query("select our_misses_private.lineup(date '2026-11-22' + n) as l from generate_series(0, 28) n")).rows.map((r) => r.l)
+  const seen = {}
+  for (let i = 0; i < 28; i++) {
+    const [today, before] = [cycle[i], cycle[(i + 27) % 28]]
+    assert.notDeepEqual(today.play.slice(0, 3).sort(), before.play.slice(0, 3).sort())
+    assert.notEqual(today.daily, before.daily)
+    assert.equal(new Set(today.play).size, 4)
+    assert.ok(['chapteh', 'cannot'].includes(today.play[3]) && today.play.slice(0, 3).every((g) => !['chapteh', 'cannot'].includes(g)))
+    for (const g of [today.daily, ...today.play]) seen[g] = (seen[g] ?? 0) + 1
   }
+  assert.deepEqual(seen, { prove: 7, tot: 7, hth: 7, agak: 7, tug: 14, pour: 14, quiz: 14, mrt: 14, kopi: 14, sps: 14, chapteh: 14, cannot: 14 })
+  assert.deepEqual({ ...cycle[28], day: 0 }, { ...cycle[0], day: 0 }, 'The cycle repeats every 28 days.')
   await as('anon')
   await fails('select public.our_misses_lineup()')
   await as('authenticated', ALEEM)
@@ -386,7 +395,7 @@ try {
     week_start: '2026-11-23', aleem: 13 + 4 + 5 + 5, nurul: 7 + 1 + 3,
     aleem_misses: 3, nurul_misses: 2, same_brains: 1, longest_rally: 4,
     aleem_proven: 1, nurul_proven: 2, aleem_bluffs: 1, nurul_bluffs: 1, aleem_duels: 2, nurul_duels: 0,
-    hands: 0, tot: 0, best_chapteh: 0,
+    hands: 0, tot: 0, best_chapteh: 0, hth: 0, agak: 0, cannot: 0,
   })
   checks++
 
@@ -485,8 +494,131 @@ try {
     aleem: 27 + 2 + 1 + 5 + 2 + 5 + 12, nurul: 11 + 3 + 2 + 12,
     aleem_misses: 5, nurul_misses: 2, same_brains: 1, longest_rally: 4,
     aleem_proven: 1, nurul_proven: 2, aleem_bluffs: 1, nurul_bluffs: 1, aleem_duels: 3, nurul_duels: 0,
-    hands: 8, tot: 4, best_chapteh: 40,
+    hands: 8, tot: 4, best_chapteh: 40, hth: 0, agak: 0, cannot: 0,
   })
+  checks++
+
+  // ---- Batch 1: Heart to Heart -------------------------------------------------------------
+  await as('authenticated', ALEEM)
+  await at(T8 + 2 * 60 * 60_000)
+  assert.deepEqual((await rpc('our_misses_hth_today')).today, { day: '2026-11-28', revealed: false, Aleem: null, Nurul: null })
+  const hthMine = await rpc('our_misses_hth_answer', 'know-03', '  Your laugh on the phone.  ')
+  assert.deepEqual([hthMine.today.Aleem, hthMine.today.Nurul], [{ question: 'know-03', answer: 'Your laugh on the phone.' }, null])
+  await fails("select public.our_misses_hth_answer('know-03', 'again')", [], 'P0001')
+  await as('authenticated', NURUL)
+  await fails("select public.our_misses_hth_answer('know-03', '   ')", [], '22023')
+  await fails('select public.our_misses_hth_answer($1, $2)', ['know-03', 'x'.repeat(601)], '22023')
+  assert.deepEqual((await rpc('our_misses_hth_today')).today.Aleem, { answered: true }, 'Hidden until you both answer.')
+  assert.equal((await eventsOf('hth')).length, 0)
+  const hthBoth = await rpc('our_misses_hth_answer', 'know-03', 'Your voice notes.')
+  assert.equal(hthBoth.today.revealed, true)
+  assert.equal(hthBoth.today.Aleem.answer, 'Your laugh on the phone.')
+  assert.deepEqual((await eventsOf('hth')).map((e) => [e.player, e.points]), [['Aleem', 2], ['Nurul', 2]])
+  const hthAlbum = await rpc('our_misses_hth_album', 10)
+  assert.deepEqual([hthAlbum.length, hthAlbum[0].day, hthAlbum[0].Nurul.answer], [1, '2026-11-28', 'Your voice notes.'])
+  checks += 10
+
+  // ---- Batch 1: Agak Agak --------------------------------------------------------------------
+  await as('authenticated', NURUL)
+  const agakPeek = (await rpc('our_misses_agak_today')).today
+  assert.deepEqual([agakPeek.psychic, agakPeek.target, agakPeek.clue], ['Aleem', null, null], 'Aleem clues first; the target stays hidden.')
+  assert.match(agakPeek.card, /^agak-([1-9]|[1-9]\d)$/)
+  await fails("select public.our_misses_agak_clue('hot')", [], 'P0001') // not the Psychic
+  await fails('select public.our_misses_agak_guess(90)', [], 'P0001') // no clue yet
+  await as('authenticated', ALEEM)
+  const agakMine = (await rpc('our_misses_agak_today')).today
+  assert.ok(agakMine.target >= 16.25 && agakMine.target <= 163.75, 'The Psychic sees the target.')
+  await fails('select public.our_misses_agak_clue($1)', ['x'.repeat(81)], '22023')
+  assert.equal((await rpc('our_misses_agak_clue', ' lukewarm milo ')).today.clue, 'lukewarm milo')
+  await fails("select public.our_misses_agak_clue('another')", [], 'P0001') // one clue
+  await fails('select public.our_misses_agak_guess(90)', [], 'P0001') // the Psychic doesn't guess
+  await as('authenticated', NURUL)
+  await fails('select public.our_misses_agak_guess(181)', [], '22023')
+  const bullseye = (await rpc('our_misses_agak_guess', Number(agakMine.target) - 2)).today
+  assert.deepEqual([bullseye.score, Number(bullseye.target)], [4, Number(agakMine.target)])
+  await fails('select public.our_misses_agak_guess(90)', [], 'P0001') // one guess
+  assert.deepEqual((await eventsOf('agak')).map((e) => [e.player, e.points]), [['Aleem', 4], ['Nurul', 4]], 'You score together.')
+  // The next Agak day, the guesser clues. A miss by 20 degrees scores nothing.
+  const T9 = T8 + DAY // Sunday 12:00, the season's last day
+  await at(T9)
+  const agak2 = (await rpc('our_misses_agak_today'))
+  assert.deepEqual([agak2.today.psychic, agak2.last.day, agak2.last.score], ['Nurul', '2026-11-28', 4])
+  await rpc('our_misses_agak_clue', 'your driving')
+  await as('authenticated', ALEEM)
+  const far = Number(agak2.today.target) > 90 ? Number(agak2.today.target) - 20 : Number(agak2.today.target) + 20
+  assert.equal((await rpc('our_misses_agak_guess', far)).today.score, 0)
+  assert.equal((await eventsOf('agak')).length, 2)
+  checks += 16
+
+  // ---- Batch 1: Kopi Rush (versus) -----------------------------------------------------------
+  const kopi = await rpc('our_misses_duel_start', 'kopi')
+  await at(T9 + 4_000 + 30_000)
+  await fails('select public.our_misses_duel_finish($1, 9, false)', [kopi.id], '22023') // mid-shift
+  await at(T9 + 4_000 + 57_000)
+  assert.equal((await rpc('our_misses_duel_finish', kopi.id, 55, false)).aleem_score, 40, 'capped')
+  await as('authenticated', NURUL)
+  const kopiDone = await rpc('our_misses_duel_finish', kopi.id, 12, false)
+  assert.deepEqual([kopiDone.game, kopiDone.winner, kopiDone.points], ['kopi', 'Aleem', 5], "Sunday's first win.")
+  checks += 3
+
+  // ---- Batch 1: Scissors-Paper-Stone (versus) ------------------------------------------------
+  await at(T9 + 5 * 60_000)
+  const sps = await rpc('our_misses_duel_start', 'sps')
+  const throwAs = async (who, round, hand) => { await as('authenticated', who); return rpc('our_misses_sps_throw', sps.id, round, hand) }
+  await fails("select public.our_misses_sps_throw($1, 1, 'stone')", [sps.id], 'P0001') // before the start
+  await at(T9 + 5 * 60_000 + 6_000)
+  await fails("select public.our_misses_sps_throw($1, 1, 'rock')", [sps.id], '22023')
+  const a1t = await throwAs(ALEEM, 1, 'stone')
+  assert.deepEqual([a1t.waiting, a1t.rounds, a1t.next], [true, [], 2])
+  await fails("select public.our_misses_sps_throw($1, 2, 'paper')", [sps.id], 'P0001') // one round ahead at most
+  await as('authenticated', NURUL)
+  assert.deepEqual((await rpc('our_misses_sps_get', sps.id)).rounds, [], "Aleem's throw stays hidden.")
+  const n1t = await throwAs(NURUL, 1, 'paper')
+  assert.deepEqual(n1t.rounds, [{ round: 1, mine: 'paper', theirs: 'stone', winner: 'me' }])
+  await fails('select public.our_misses_duel_finish($1, 3, false)', [sps.id], '22023') // the match isn't over
+  // tie, Nurul, Aleem, Nurul: 3-1 to Nurul after five throws.
+  for (const [round, a, n] of [[2, 'scissors', 'scissors'], [3, 'scissors', 'stone'], [4, 'stone', 'scissors'], [5, 'paper', 'scissors']]) {
+    await throwAs(ALEEM, round, a)
+    await throwAs(NURUL, round, n)
+  }
+  const spsState = await rpc('our_misses_sps_get', sps.id)
+  assert.deepEqual([spsState.mine, spsState.theirs, spsState.over, spsState.rounds.length], [3, 1, true, 5])
+  await fails("select public.our_misses_sps_throw($1, 6, 'paper')", [sps.id], 'P0001') // over
+  await rpc('our_misses_duel_finish', sps.id, 999, false)
+  await as('authenticated', ALEEM)
+  const spsDone = await rpc('our_misses_duel_finish', sps.id, 999, false)
+  assert.deepEqual([spsDone.winner, spsDone.aleem_score, spsDone.nurul_score, spsDone.points], ['Nurul', 1, 3, 0], 'Scored from the throws, not the phones.')
+  checks += 9
+
+  // ---- Batch 1: Cannot Say! (together) -------------------------------------------------------
+  const say = async (aleemSays, nurulSays, offsetMin) => {
+    await as('authenticated', ALEEM)
+    await at(T9 + offsetMin * 60_000)
+    const c = await rpc('our_misses_duel_start', 'cannot')
+    await at(T9 + offsetMin * 60_000 + 4_000 + 87_000)
+    await rpc('our_misses_duel_finish', c.id, aleemSays, false)
+    await as('authenticated', NURUL)
+    return rpc('our_misses_duel_finish', c.id, nurulSays, false)
+  }
+  await as('authenticated', ALEEM)
+  await at(T9 + 10 * 60_000)
+  const early = await rpc('our_misses_duel_start', 'cannot')
+  await at(T9 + 10 * 60_000 + 60_000)
+  await fails('select public.our_misses_duel_finish($1, 5, false)', [early.id], '22023') // mid-round
+  await at(T9 + 15 * 60_000) // the abandoned round closes after 2.5 minutes
+  const firstSay = await say(9, 7, 15)
+  assert.deepEqual([firstSay.game, firstSay.winner, firstSay.points, firstSay.aleem_score], ['cannot', 'tie', 0, 9])
+  await say(4, 4, 20)
+  await say(61, 5, 25)
+  // 7 agreed words = 6 (a round's max); then 4; then 2 more before the 12-a-day cap.
+  assert.deepEqual((await eventsOf('cannot')).map((e) => [e.player, e.points]), [['Aleem', 6], ['Nurul', 6], ['Aleem', 4], ['Nurul', 4], ['Aleem', 2], ['Nurul', 2]])
+  checks += 3
+
+  const board4 = (await db.query('select * from public.our_misses_weeks()')).rows[0]
+  assert.deepEqual(
+    [board4.aleem, board4.nurul, board4.aleem_duels, board4.nurul_duels, board4.hth, board4.agak, board4.cannot],
+    [54 + 2 + 4 + 5 + 12, 28 + 2 + 4 + 12, 4, 0, 4, 8, 24],
+  )
   checks++
 
   // Claims and duels are only reachable through the functions.
@@ -501,6 +633,11 @@ try {
   await as('anon')
   for (const sql of ['select public.our_misses_tag(1, 1)', 'select public.our_misses_hands(60)', 'select public.our_misses_tot_today()', 'select public.our_misses_tot_album(5)']) await fails(sql)
   await fails('select * from our_misses_private.tot')
+  for (const table of ['hth', 'agak', 'sps']) await fails(`select * from our_misses_private.${table}`)
+  const batch1 = ['select public.our_misses_hth_today()', "select public.our_misses_hth_answer('know-01', 'hi')", 'select public.our_misses_hth_album(5)', 'select public.our_misses_agak_today()', "select public.our_misses_agak_clue('hi')", 'select public.our_misses_agak_guess(90)', "select public.our_misses_sps_throw(1, 1, 'stone')", 'select public.our_misses_sps_get(1)']
+  for (const sql of batch1) await fails(sql)
+  await as('authenticated', OUTSIDER)
+  for (const sql of batch1) await fails(sql)
 
   console.log(`SQL checks passed: ${checks}`)
 } finally {

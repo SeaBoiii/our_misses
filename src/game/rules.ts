@@ -8,7 +8,7 @@ export const partnerOf = (p: Player): Player => (p === 'Aleem' ? 'Nurul' : 'Alee
 export interface MissEvent {
   id: number
   player: Player
-  kind: 'miss' | 'same_brain' | 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally'
+  kind: 'miss' | 'same_brain' | 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally' | 'hth' | 'agak' | 'cannot'
   charge: number | null
   rally_length: number | null
   rally_bonus: number
@@ -41,12 +41,38 @@ export interface WeekTotal {
   tot: number
   /** Longest chapteh rally that week. */
   best_chapteh: number
+  /** Misses from Heart to Heart, Agak Agak and Cannot Say! (both of you). */
+  hth: number
+  agak: number
+  cannot: number
 }
 
 /** This or That: the partner's answer is hidden (only `answered`) until you have both answered. */
 export interface TotEntry { answered?: boolean; question?: string; mine?: number; guess?: number }
 export interface TotDay { day: string; revealed: boolean; Aleem: TotEntry | null; Nurul: TotEntry | null }
 export interface TotStatus { now: string; day: string; today: TotDay }
+/** Heart to Heart: the partner's answer is hidden (only `answered`) until you have both answered. */
+export interface HthEntry { answered?: boolean; question?: string; answer?: string }
+export interface HthDay { day: string; revealed: boolean; Aleem: HthEntry | null; Nurul: HthEntry | null }
+export interface HthStatus { now: string; day: string; today: HthDay }
+
+/** Agak Agak: the target is null for the guesser until the needle is in. Degrees, 0-180. */
+export interface AgakRound {
+  day: string
+  psychic: Player
+  card: string
+  clue: string | null
+  needle: number | null
+  score: number | null
+  target: number | null
+}
+export interface AgakStatus { now: string; day: string; today: AgakRound | null; last: AgakRound | null }
+
+/** Scissors-Paper-Stone from one side: only rounds you've both thrown are shown. */
+export type SpsThrow = 'scissors' | 'paper' | 'stone'
+export interface SpsRound { round: number; mine: SpsThrow; theirs: SpsThrow; winner: 'me' | 'them' | 'tie' }
+export interface SpsState { rounds: SpsRound[]; waiting: boolean; next: number; mine: number; theirs: number; over: boolean }
+
 export interface ReasonCount { player: Player; reason: number; n: number }
 
 /** One player's Prove It for a day. The partner's claim is hidden (only `finished`) until the reveal. */
@@ -57,8 +83,10 @@ export interface ProveStart { level: number; target: number; started_at: string 
 /**
  * VS games. tug: 15 s of tapping. pour: a water sort race on one shared puzzle.
  * quiz / mrt: the same 7 questions (SG trivia / the MRT network). chapteh: together, one shared rally.
+ * kopi: the same orders for 60 s, most drinks right wins. sps: best of 5, scored from the throws.
+ * cannot: together, describe words without the banned ones.
  */
-export type VsGame = 'tug' | 'pour' | 'quiz' | 'chapteh' | 'mrt'
+export type VsGame = 'tug' | 'pour' | 'quiz' | 'chapteh' | 'mrt' | 'kopi' | 'sps' | 'cannot'
 export interface Duel {
   id: number
   game: VsGame
@@ -74,8 +102,12 @@ export interface Duel {
   now: string
 }
 export const DUEL_COUNTDOWN_MS = 4_000
-export const VS_LENGTH_MS: Record<VsGame, number> = { tug: 15_000, pour: 180_000, quiz: 110_000, chapteh: 300_000, mrt: 110_000 }
+export const VS_LENGTH_MS: Record<VsGame, number> = {
+  tug: 15_000, pour: 180_000, quiz: 110_000, chapteh: 300_000, mrt: 110_000, kopi: 60_000, sps: 120_000, cannot: 90_000,
+}
 export const isQuizGame = (g: VsGame) => g === 'quiz' || g === 'mrt'
+/** Together games: nobody wins; both of you earn what you both agree on. */
+export const isTogether = (g: VsGame) => g === 'chapteh' || g === 'cannot'
 export const DUEL_POINTS = 5
 export const SOLVED_BASE = 1_000_000
 /** Mirrors the database: how a finished VS game is scored. */
@@ -83,6 +115,9 @@ export function vsScore(game: VsGame, value: number, solved: boolean, elapsedMs:
   if (game === 'tug') return Math.min(300, Math.max(0, value))
   if (game === 'quiz' || game === 'mrt') return Math.min(1540, Math.max(0, value))
   if (game === 'chapteh') return Math.min(500, Math.max(0, value))
+  if (game === 'kopi') return Math.min(40, Math.max(0, value))
+  if (game === 'cannot') return Math.min(60, Math.max(0, value))
+  if (game === 'sps') return Math.min(9, Math.max(0, value))
   return solved ? SOLVED_BASE - Math.min(SOLVED_BASE - 1, Math.floor(elapsedMs)) : Math.min(20, Math.max(0, value))
 }
 /** "48 taps", "solved in 1:02.4", "3 bottles". */
@@ -91,6 +126,9 @@ export function describeVsScore(game: VsGame, score: number | null) {
   if (game === 'tug') return `${score} tap${score === 1 ? '' : 's'}`
   if (game === 'quiz' || game === 'mrt') return `${score} pts`
   if (game === 'chapteh') return `${score} kick${score === 1 ? '' : 's'}`
+  if (game === 'kopi') return `${score} drink${score === 1 ? '' : 's'}`
+  if (game === 'sps') return `${score} win${score === 1 ? '' : 's'}`
+  if (game === 'cannot') return `${score} word${score === 1 ? '' : 's'}`
   if (score >= SOLVED_BASE / 2) {
     const ms = SOLVED_BASE - score
     const m = Math.floor(ms / 60_000)
@@ -103,7 +141,7 @@ export function describeVsScore(game: VsGame, score: number | null) {
 export const emptyWeek = (week_start: string): WeekTotal => ({
   week_start, aleem: 0, nurul: 0, aleem_misses: 0, nurul_misses: 0, same_brains: 0, longest_rally: 0,
   aleem_proven: 0, nurul_proven: 0, aleem_bluffs: 0, nurul_bluffs: 0, aleem_duels: 0, nurul_duels: 0,
-  hands: 0, tot: 0, best_chapteh: 0,
+  hands: 0, tot: 0, best_chapteh: 0, hth: 0, agak: 0, cannot: 0,
 })
 
 export const HEART_CAP = 3
@@ -266,6 +304,9 @@ export function weekTotalsFrom(events: readonly MissEvent[]): WeekTotal[] {
       else w.nurul_duels++
     } else if (e.kind === 'hands') w.hands += e.points
     else if (e.kind === 'tot') w.tot += e.points
+    else if (e.kind === 'hth') w.hth += e.points
+    else if (e.kind === 'agak') w.agak += e.points
+    else if (e.kind === 'cannot') w.cannot += e.points
     byWeek.set(k, w)
   }
   return [...byWeek.values()].sort((a, b) => b.week_start.localeCompare(a.week_start))

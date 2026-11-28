@@ -1,13 +1,24 @@
 import type { Lineups } from '../game/lineup'
 import type { Zone } from '../game/more'
 import type {
-  Duel, MissEvent, Player, ProveStart, ProveStatus, ReasonCount, SendResult, Status, TotDay, TotStatus, VsGame, WeekTotal,
+  AgakStatus, Duel, HthDay, HthStatus, MissEvent, Player, ProveStart, ProveStatus, ReasonCount, SendResult, SpsState, SpsThrow,
+  Status, TotDay, TotStatus, VsGame, WeekTotal,
 } from '../game/rules'
 
 /** Messages the two phones pass each other directly (not stored). */
 export type Signal =
   | { type: 'prove_played' }
   | { type: 'tot_answered' }
+  | { type: 'hth_answered' }
+  /** Agak Agak: a clue went in, or the needle did. */
+  | { type: 'agak_moved' }
+  /** Scissors-Paper-Stone: I've thrown this round (the throw itself stays in the database). */
+  | { type: 'sps_thrown'; round: number }
+  /** Cannot Say!: clues and guesses for card number `card` of the shared deck. */
+  | { type: 'cannot_clue'; card: number; text: string }
+  | { type: 'cannot_guess'; card: number; text: string }
+  | { type: 'cannot_got'; card: number }
+  | { type: 'cannot_pass'; card: number }
   | { type: 'duel_invite'; game: VsGame }
   | { type: 'duel_decline' }
   | { type: 'duel_cancel' }
@@ -41,6 +52,15 @@ export interface Backend {
   totToday(): Promise<TotStatus>
   totAnswer(question: string, mine: number, guess: number): Promise<TotStatus>
   totAlbum(): Promise<TotDay[]>
+  hthToday(): Promise<HthStatus>
+  hthAnswer(question: string, answer: string): Promise<HthStatus>
+  hthAlbum(): Promise<HthDay[]>
+  /** Deals today's round the first time either of you opens it on an Agak Agak day. */
+  agakToday(): Promise<AgakStatus>
+  agakClue(clue: string): Promise<AgakStatus>
+  agakGuess(needle: number): Promise<AgakStatus>
+  spsThrow(id: number, round: number, hand: SpsThrow): Promise<SpsState>
+  spsGet(id: number): Promise<SpsState>
   proveToday(): Promise<ProveStatus>
   proveStart(level: number): Promise<ProveStart>
   proveFinish(score: number): Promise<ProveStatus>

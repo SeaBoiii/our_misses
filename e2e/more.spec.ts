@@ -121,16 +121,16 @@ test('Chapteh: serve, kick it back on time, and count the rally together', async
 })
 
 test('Daily lineup: only today’s games, and a peek at tomorrow', async ({ page }) => {
-  // 22 Nov 2026 is a This or That day with Tug of war, Next Stop and Kiasu Quiz.
+  // 22 Nov 2026 is an Agak Agak day with Kiasu Quiz, Tug of war, Pour-off and Cannot Say!.
   await start(page, '?quiet&lineupday=2026-11-22')
-  await expect(page.getByTestId('open-tot')).toBeVisible()
-  await expect(page.getByTestId('open-prove')).toHaveCount(0)
-  await expect(page.getByTestId('today-games')).toHaveText(/Tug of war.*Kiasu Quiz.*Next Stop/)
-  await expect(page.getByTestId('teaser')).toHaveText('Tomorrow: 🔍 Prove It · 🪢 🧠 🪶')
+  await expect(page.getByTestId('open-agak')).toBeVisible()
+  for (const g of ['prove', 'tot', 'hth']) await expect(page.getByTestId(`open-${g}`)).toHaveCount(0)
+  await expect(page.getByTestId('today-games')).toHaveText(/Tug of war.*Pour-off.*Kiasu Quiz.*Cannot Say!/)
+  await expect(page.getByTestId('teaser')).toHaveText('Tomorrow: 🔍 Prove It · ✊ 🧠 🧪 🪶')
   await page.getByTestId('open-duel').click()
-  for (const g of ['tug', 'quiz', 'mrt']) await expect(page.getByTestId(`vs-${g}`)).toBeVisible()
-  for (const g of ['pour', 'chapteh']) await expect(page.getByTestId(`vs-${g}`)).toHaveCount(0)
-  await expect(page.getByText('Together')).toHaveCount(0)
+  for (const g of ['tug', 'pour', 'quiz', 'cannot']) await expect(page.getByTestId(`vs-${g}`)).toBeVisible()
+  for (const g of ['mrt', 'kopi', 'sps', 'chapteh']) await expect(page.getByTestId(`vs-${g}`)).toHaveCount(0)
+  await expect(page.locator('.vs-heading')).toHaveText(['Versus', 'Together'])
   await page.getByRole('dialog').getByRole('button', { name: 'not now' }).click()
   // Prove It is resting today, even by its address.
   await page.goto('/?quiet&lineupday=2026-11-22#prove')

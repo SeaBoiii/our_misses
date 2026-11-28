@@ -2,14 +2,18 @@ import { useEffect, useState, type PointerEvent } from 'react'
 import { playOn, type Lineup } from '../game/lineup'
 import { quizRound, rallyMisses, type QuizItem } from '../game/more'
 import { MRT_CATS, mrtRound } from '../game/mrt'
-import { describeVsScore, isQuizGame, VS_LENGTH_MS, type Player, type VsGame } from '../game/rules'
+import { CANNOT_PER_ROUND } from '../game/batch1'
+import { describeVsScore, isQuizGame, isTogether, VS_LENGTH_MS, type Player, type VsGame } from '../game/rules'
 import { CATEGORIES } from '../quiz/questions'
 import { VS_GAMES } from '../game/vsGames'
 import type { DuelApi } from '../lib/useDuel'
+import { CannotSay } from './CannotSay'
 import { ChaptehRally } from './ChaptehRally'
+import { KopiRush } from './KopiRush'
 import { PourRace } from './PourRace'
 import { QuizGame } from './QuizGame'
 import { Rope } from './Rope'
+import { SpsMatch } from './SpsMatch'
 
 /** Each quiz round is dealt once per game (the overlay redraws every 100 ms). */
 const rounds = new Map<string, QuizItem[]>()
@@ -89,12 +93,14 @@ export function DuelOverlay({ duel, demo, lineup = null }: { duel: DuelApi; demo
     const result = phase.kind !== 'done' ? null
       : d.game === 'chapteh'
         ? `You kept it up ${together} time${together === 1 ? '' : 's'} together!${rallyMisses(together) > 0 ? ` +${rallyMisses(together)} misses each` : ''}`
-        : d.winner === 'tie' ? 'A tie! Nobody gets the 5.'
+        : d.game === 'cannot'
+          ? `You got ${together} word${together === 1 ? '' : 's'} together!${together > 0 ? ` +${Math.min(together, CANNOT_PER_ROUND)} misses each` : ''}`
+          : d.winner === 'tie' ? 'A tie! Nobody gets the 5.'
           : `${d.winner === me ? 'You win' : `${d.winner} wins`}! ${d.points > 0 ? `+${d.points} misses` : '(today’s +5 was already claimed)'}`
     const resultBlock = result && (
       <>
         <p className="duel-result" data-testid="duel-result">{result}</p>
-        {d.game !== 'tug' && d.game !== 'chapteh' && (
+        {d.game !== 'tug' && !isTogether(d.game) && (
           <ul className="race-scores">
             {(['Aleem', 'Nurul'] as const).map((p) => (
               <li key={p}><b>{p === me ? 'You' : p}</b> {describeVsScore(d.game, scoreOf(p))}</li>
@@ -132,6 +138,42 @@ export function DuelOverlay({ duel, demo, lineup = null }: { duel: DuelApi; demo
           {phase.kind === 'reporting' && (
             <p className="loading" data-testid="race-waiting">
               {quiz ? `You scored ${mine}. Waiting for ${partner}…` : `${duel.rally.kicks} kicks! Checking with ${partner}’s phone…`}
+            </p>
+          )}
+          {resultBlock}
+        </div>
+      )
+      return <div className="duel" role="dialog" aria-label="VS">{body}</div>
+    }
+
+    if (d.game === 'kopi' || d.game === 'sps' || d.game === 'cannot') {
+      const intro = {
+        kopi: 'Same orders on both phones. Tap in what each customer asks for, then serve. Most drinks right in a minute wins.',
+        sps: `Best of 5 against ${partner}. Your throw stays hidden until you’ve both thrown.`,
+        cannot: `${duel.me === d.started_by ? partner : 'You'} describe${duel.me === d.started_by ? 's' : ''} first, then you swap at 45 seconds. Type clues, never the banned words.`,
+      }[d.game]
+      body = (
+        <div className="duel-card wide race">
+          <div className="race-head">
+            <span className="duel-time">{VS_GAMES[d.game].icon} {VS_GAMES[d.game].name}{d.game === 'kopi' && !counting && phase.kind === 'live' ? ` · ${clock(left)}` : ''}</span>
+            {d.game === 'kopi' && <span className="race-them" data-testid="race-them">{partner}: {value(partner)} served</span>}
+          </div>
+          {counting && (
+            <>
+              <div className="countdown" data-testid="duel-countdown">{Math.ceil((start - t) / 1000)}</div>
+              <p className="muted">{intro}</p>
+            </>
+          )}
+          {phase.kind === 'live' && !counting && (
+            d.game === 'kopi' ? <KopiRush seed={d.seed} onServe={duel.setScore} exposeAnswers={demo} />
+              : d.game === 'sps' ? <SpsMatch duel={duel} game={d} />
+                : <CannotSay duel={duel} game={d} demo={demo} />
+          )}
+          {phase.kind === 'reporting' && (
+            <p className="loading" data-testid="race-waiting">
+              {d.game === 'kopi' ? `Shift over! You served ${mine}. Waiting for ${partner}…`
+                : d.game === 'sps' ? `Checking the throws with ${partner}’s phone…`
+                  : `${mine} word${mine === 1 ? '' : 's'}! Checking with ${partner}’s phone…`}
             </p>
           )}
           {resultBlock}

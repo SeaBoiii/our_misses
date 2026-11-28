@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Backend, Change, Signal } from '../lib/backend'
+import { hthOfDay } from '../game/batch1'
 import { PROVE_LEVELS } from '../game/catch'
 import { dailyOn, playOn, previousDay, type Lineup, type Lineups } from '../game/lineup'
 import { HANDS_DAILY_CAP, reasonOf, REASONS, TAG_WINDOW_MS, totOfDay } from '../game/more'
@@ -7,13 +8,17 @@ import { VS_GAMES } from '../game/vsGames'
 import {
   dayKey, history as buildHistory, liveHearts, NoHeartsError, partnerOf, rallyState, seasons, totals, WEEK_MS, weekKey,
   weekStartMs, weekTotalsFrom, emptyWeek,
-  type MissEvent, type Player, type ProveStatus, type ReasonCount, type Status, type TotStatus, type WeekTotal,
+  type AgakStatus, type HthStatus, type MissEvent, type Player, type ProveStatus, type ReasonCount, type Status, type TotStatus,
+  type WeekTotal,
 } from '../game/rules'
+import type { DailyGame } from '../game/lineup'
 import { ago, countdown, weekLabel } from '../lib/format'
 import { isMuted, setMuted, sfx } from '../lib/sound'
 import { useDuel } from '../lib/useDuel'
 import { useHands } from '../lib/useHands'
+import { AgakAgak } from './AgakAgak'
 import { DuelOverlay } from './Duel'
+import { HeartToHeart } from './HeartToHeart'
 import { History } from './History'
 import { HoldHands } from './HoldHands'
 import { InstallCard } from './Install'
@@ -22,8 +27,10 @@ import { ProveIt } from './ProveIt'
 import { Rope } from './Rope'
 import { ThisOrThat } from './ThisOrThat'
 
-type View = 'rope' | 'history' | 'prove' | 'tot'
-const VIEWS = ['history', 'prove', 'tot'] as const
+type View = 'rope' | 'history' | 'prove' | 'tot' | 'hth' | 'agak'
+const VIEWS = ['history', 'prove', 'tot', 'hth', 'agak'] as const
+const DAILY_NAME: Record<DailyGame, string> = { prove: '🔍 Prove It', tot: '🤔 This or That', hth: '💬 Heart to Heart', agak: '🎯 Agak Agak' }
+const AGAK_VERDICT: Record<number, string> = { 4: 'bullseye! +4 each', 3: 'so close! +3 each', 2: 'agak agak, +2 each', 0: 'way off this time' }
 const viewFromHash = (): View => (VIEWS as readonly string[]).includes(location.hash.slice(1)) ? (location.hash.slice(1) as View) : 'rope'
 
 interface Toast { id: number; text: string; tone?: 'love' | 'warn' }
@@ -65,6 +72,10 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
   const [proveRefresh, setProveRefresh] = useState(0)
   const [tot, setTot] = useState<TotStatus | null>(null)
   const [totRefresh, setTotRefresh] = useState(0)
+  const [hth, setHth] = useState<HthStatus | null>(null)
+  const [hthRefresh, setHthRefresh] = useState(0)
+  const [agak, setAgak] = useState<AgakStatus | null>(null)
+  const [agakRefresh, setAgakRefresh] = useState(0)
   const [reasons, setReasons] = useState<ReasonCount[]>([])
   /** Today's rotation (null until loaded, or if it can't be: then everything shows and the database decides). */
   const [lineups, setLineups] = useState<Lineups | null>(null)
@@ -109,14 +120,18 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
     try {
       const s = await backend.status()
       const serverNow = Date.parse(s.now)
-      const [ev, wk, pv, tt, lu] = await Promise.all([
+      const [ev, wk, pv, tt, lu, ht, ag] = await Promise.all([
         backend.weekEvents(new Date(weekStartMs(serverNow)).toISOString()),
         backend.weeks(),
         backend.proveToday().catch(() => null),
         backend.totToday().catch(() => null),
         backend.lineup().catch(() => null),
+        backend.hthToday().catch(() => null),
+        backend.agakToday().catch(() => null),
       ])
       if (tt) setTot(tt)
+      if (ht) setHth(ht)
+      if (ag) setAgak(ag)
       setLineups(lu ?? null)
       lineupDay.current = dayKey(serverNow)
       known.current = new Set(ev.map((e) => e.id))
@@ -156,6 +171,8 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       return
     }
     if (e.kind === 'tot') { setTotRefresh((n) => n + 1); return }
+    if (e.kind === 'hth') { setHthRefresh((n) => n + 1); return }
+    if (e.kind === 'agak') { setAgakRefresh((n) => n + 1); return }
     if (e.kind !== 'miss') return
     if (e.player === me) return
     fly(avatarEl(partner), avatarEl(me), e.charge ?? 1, 'in')
@@ -182,6 +199,16 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       setTotRefresh((n) => n + 1)
       return
     }
+    if (s.type === 'hth_answered') {
+      toast(`💬 ${partner} answered Heart to Heart`, 'love')
+      setHthRefresh((n) => n + 1)
+      return
+    }
+    if (s.type === 'agak_moved') {
+      toast(`🎯 ${partner} made a move in Agak Agak`, 'love')
+      setAgakRefresh((n) => n + 1)
+      return
+    }
     if (s.type === 'hands') { hands.onSignal(s); return }
     duel.onSignal(s)
   }, [duel, hands, partner, toast])
@@ -198,6 +225,14 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
     if (totRefresh === 0) return
     backend.totToday().then(setTot).catch(() => { /* keep the last one */ })
   }, [backend, totRefresh])
+  useEffect(() => {
+    if (hthRefresh === 0) return
+    backend.hthToday().then(setHth).catch(() => { /* keep the last one */ })
+  }, [backend, hthRefresh])
+  useEffect(() => {
+    if (agakRefresh === 0) return
+    backend.agakToday().then(setAgak).catch(() => { /* keep the last one */ })
+  }, [backend, agakRefresh])
   useEffect(() => {
     if (!tagFor) return
     const id = setTimeout(() => setTagFor(null), Math.max(0, tagFor.until - Date.now()))
@@ -339,7 +374,7 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       : 'first versus win today +5'
   const tomorrow = lineups?.tomorrow
   const teaser = tomorrow && !tomorrow.all
-    ? `Tomorrow: ${tomorrow.daily === 'prove' ? '🔍 Prove It' : '🤔 This or That'} · ${tomorrow.play.map((g) => VS_GAMES[g].icon).join(' ')}`
+    ? `Tomorrow: ${DAILY_NAME[tomorrow.daily]} · ${tomorrow.play.map((g) => VS_GAMES[g].icon).join(' ')}`
     : null
   // On a This or That day, yesterday's Prove It results are revealed: keep a way to see them.
   const yesterdayProve = !dailyOn(today, 'prove') && prove?.last?.revealed && prove.last.day === previousDay(dayKey(now))
@@ -347,6 +382,15 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
   const totLine = !tot ? '…'
     : !myTot ? `${totOfDay(tot.day).a} or ${totOfDay(tot.day).b}?`
       : tot.today.revealed ? 'results are in' : `waiting for ${partner}`
+  const myHth = hth?.today[me] ?? null
+  const hthLine = !hth ? '…'
+    : !myHth ? hthOfDay(hth.day).prompt
+      : hth.today.revealed ? 'answers are in 💞' : `waiting for ${partner}`
+  const round = agak?.today ?? null
+  const agakLine = !agak ? '…' : !round ? 'resting today'
+    : round.needle !== null ? AGAK_VERDICT[round.score ?? 0]
+      : round.psychic === me ? (round.clue ? `waiting for ${partner}’s needle` : 'you’re the Psychic 🔮')
+        : round.clue ? 'your turn: set the needle' : `waiting for ${partner}’s clue`
   const handsToday = events.filter((e) => e.kind === 'hands' && e.player === me && dayKey(Date.parse(e.created_at)) === dayKey(now))
     .reduce((sum, e) => sum + e.points, 0)
   const handsLine = partnerHere ? `${partner} is here · ${handsToday}/${HANDS_DAILY_CAP} today` : `best when ${partner} is on too`
@@ -381,7 +425,9 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       {view === 'history' ? <History data={board} me={me} reasons={reasons} onBack={closeView} />
         : view === 'prove' ? <ProveIt backend={backend} me={me} partner={partner} refresh={proveRefresh} onBack={closeView} onChange={setProve} toast={toast} onToday={dailyOn(today, 'prove')} />
           : view === 'tot' ? <ThisOrThat backend={backend} me={me} partner={partner} refresh={totRefresh} onBack={closeView} onChange={setTot} toast={toast} onToday={dailyOn(today, 'tot')} />
-            : <>
+            : view === 'hth' ? <HeartToHeart backend={backend} me={me} partner={partner} refresh={hthRefresh} onBack={closeView} onChange={setHth} toast={toast} onToday={dailyOn(today, 'hth')} />
+              : view === 'agak' ? <AgakAgak backend={backend} me={me} partner={partner} refresh={agakRefresh} onBack={closeView} onChange={setAgak} toast={toast} onToday={dailyOn(today, 'agak')} />
+                : <>
       {winnerLine && <button className="banner" onClick={openHistory}>{winnerLine} <span aria-hidden="true">›</span></button>}
 
       <section className="card board" aria-label="This week's tug of war">
@@ -469,6 +515,20 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
               <small>{totLine}</small>
             </button>
           )}
+          {dailyOn(today, 'hth') && (
+            <button className="today-btn" onClick={() => open('hth')} data-testid="open-hth">
+              <span className="today-icon" aria-hidden="true">💬</span>
+              <span className="today-name">Heart to Heart</span>
+              <small className="clamp">{hthLine}</small>
+            </button>
+          )}
+          {dailyOn(today, 'agak') && (
+            <button className="today-btn" onClick={() => open('agak')} data-testid="open-agak">
+              <span className="today-icon" aria-hidden="true">🎯</span>
+              <span className="today-name">Agak Agak</span>
+              <small>{agakLine}</small>
+            </button>
+          )}
           <button className="today-btn" onClick={hands.openScreen} data-testid="open-hands">
             <span className="today-icon" aria-hidden="true">🤝</span>
             <span className="today-name">Hold hands</span>
@@ -500,6 +560,9 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
                       : e.kind === 'hands' ? <span>🤝 {e.player === me ? 'You' : e.player} held hands <em>+{e.points}</em></span>
                         : e.kind === 'tot' ? <span>🤔 {e.player === me ? 'You' : e.player} This or That <em>+{e.points}</em></span>
                           : e.kind === 'rally' ? <span>🪶 {e.player === me ? 'You' : e.player} chapteh rally <em>+{e.points}</em></span>
+                          : e.kind === 'hth' ? <span>💬 {e.player === me ? 'You' : e.player} Heart to Heart <em>+{e.points}</em></span>
+                          : e.kind === 'agak' ? <span>🎯 {e.player === me ? 'You' : e.player} Agak Agak <em>+{e.points}</em></span>
+                          : e.kind === 'cannot' ? <span>🙊 {e.player === me ? 'You' : e.player} Cannot Say! <em>+{e.points}</em></span>
                             : <span>{e.player === me ? 'You' : e.player} {'♥'.repeat(e.charge ?? 1)}{e.rally_bonus > 0 && <em> +{e.rally_bonus} rally</em>}{reasonOf(e.reason) && <em className="feed-why"> · {reasonOf(e.reason)!.icon} {reasonOf(e.reason)!.label}</em>}</span>}
                 <time>{ago(now - Date.parse(e.created_at))}</time>
               </li>
@@ -509,7 +572,7 @@ export function Game({ backend, onLeave }: { backend: Backend; onLeave(): void }
       </section>
 
       <footer className="foot">
-        <p>Hold to charge (up to 3), then tap why. Answer a miss within 5 min for a rally bonus. Send at the same moment for a Same Brain. Hearts refill every 30 min. Prove It and This or That once a day; the first versus win each day is +5; hold hands for up to 5 a day. Seasons end Sunday midnight.</p>
+        <p>Hold to charge (up to 3), then tap why. Answer a miss within 5 min for a rally bonus. Send at the same moment for a Same Brain. Hearts refill every 30 min. One daily game (Prove It, This or That, Heart to Heart or Agak Agak) each day; the first versus win each day is +5; hold hands for up to 5 a day. Seasons end Sunday midnight.</p>
         {backend.refillHearts && <button className="link" onClick={() => { backend.refillHearts!(); refreshStatus() }}>refill my hearts (demo)</button>}
       </footer>
       </>}
