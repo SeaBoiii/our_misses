@@ -3,12 +3,17 @@ import { playOn, type Lineup } from '../game/lineup'
 import { quizRound, rallyMisses, type QuizItem } from '../game/more'
 import { MRT_CATS, mrtRound } from '../game/mrt'
 import { CANNOT_PER_ROUND } from '../game/batch1'
+import { golfStrokes, syncMisses } from '../game/batch2'
 import { describeVsScore, isQuizGame, isTogether, VS_LENGTH_MS, type Player, type VsGame } from '../game/rules'
 import { CATEGORIES } from '../quiz/questions'
 import { VS_GAMES } from '../game/vsGames'
 import type { DuelApi } from '../lib/useDuel'
 import { CannotSay } from './CannotSay'
 import { ChaptehRally } from './ChaptehRally'
+import { ChopeMatch } from './ChopeMatch'
+import { DrawGuess } from './DrawGuess'
+import { GolfRound } from './GolfRound'
+import { InSync } from './InSync'
 import { KopiRush } from './KopiRush'
 import { PourRace } from './PourRace'
 import { QuizGame } from './QuizGame'
@@ -93,8 +98,10 @@ export function DuelOverlay({ duel, demo, lineup = null }: { duel: DuelApi; demo
     const result = phase.kind !== 'done' ? null
       : d.game === 'chapteh'
         ? `You kept it up ${together} time${together === 1 ? '' : 's'} together!${rallyMisses(together) > 0 ? ` +${rallyMisses(together)} misses each` : ''}`
-        : d.game === 'cannot'
+        : d.game === 'cannot' || d.game === 'draw'
           ? `You got ${together} word${together === 1 ? '' : 's'} together!${together > 0 ? ` +${Math.min(together, CANNOT_PER_ROUND)} misses each` : ''}`
+          : d.game === 'sync'
+            ? `You hit ${together} beat${together === 1 ? '' : 's'} together!${syncMisses(together) > 0 ? ` +${syncMisses(together)} misses each` : ''}`
           : d.winner === 'tie' ? 'A tie! Nobody gets the 5.'
           : `${d.winner === me ? 'You win' : `${d.winner} wins`}! ${d.points > 0 ? `+${d.points} misses` : '(today’s +5 was already claimed)'}`
     const resultBlock = result && (
@@ -146,11 +153,16 @@ export function DuelOverlay({ duel, demo, lineup = null }: { duel: DuelApi; demo
       return <div className="duel" role="dialog" aria-label="VS">{body}</div>
     }
 
-    if (d.game === 'kopi' || d.game === 'sps' || d.game === 'cannot') {
+    if (d.game === 'kopi' || d.game === 'sps' || d.game === 'cannot' || d.game === 'golf' || d.game === 'chope' || d.game === 'draw' || d.game === 'sync') {
+      const theyGoFirst = duel.me === d.started_by
       const intro = {
         kopi: 'Same orders on both phones. Tap in what each customer asks for, then serve. Most drinks right in a minute wins.',
         sps: `Best of 5 against ${partner}. Your throw stays hidden until you’ve both thrown.`,
-        cannot: `${duel.me === d.started_by ? partner : 'You'} describe${duel.me === d.started_by ? 's' : ''} first, then you swap at 45 seconds. Type clues, never the banned words.`,
+        cannot: `${theyGoFirst ? partner : 'You'} describe${theyGoFirst ? 's' : ''} first, then you swap at 45 seconds. Type clues, never the banned words.`,
+        golf: 'The same 3 holes on both phones, 3 minutes. Drag back from anywhere like a catapult and let go to putt. Fewest strokes wins.',
+        chope: `Take turns putting a tissue packet on a stool. Fill all 4 round a table to claim it. ${theyGoFirst ? partner : 'You'} go${theyGoFirst ? 'es' : ''} first.`,
+        draw: `${theyGoFirst ? partner : 'You'} draw${theyGoFirst ? 's' : ''} first, then you swap at 45 seconds. No letters allowed!`,
+        sync: 'The same rhythm on both phones. Tap as each note reaches the line.',
       }[d.game]
       body = (
         <div className="duel-card wide race">
@@ -167,13 +179,20 @@ export function DuelOverlay({ duel, demo, lineup = null }: { duel: DuelApi; demo
           {phase.kind === 'live' && !counting && (
             d.game === 'kopi' ? <KopiRush seed={d.seed} onServe={duel.setScore} exposeAnswers={demo} />
               : d.game === 'sps' ? <SpsMatch duel={duel} game={d} />
-                : <CannotSay duel={duel} game={d} demo={demo} />
+                : d.game === 'golf' ? <GolfRound duel={duel} game={d} demo={demo} />
+                  : d.game === 'chope' ? <ChopeMatch duel={duel} game={d} />
+                    : d.game === 'draw' ? <DrawGuess duel={duel} game={d} demo={demo} />
+                      : d.game === 'sync' ? <InSync duel={duel} game={d} demo={demo} />
+                        : <CannotSay duel={duel} game={d} demo={demo} />
           )}
           {phase.kind === 'reporting' && (
             <p className="loading" data-testid="race-waiting">
               {d.game === 'kopi' ? `Shift over! You served ${mine}. Waiting for ${partner}…`
                 : d.game === 'sps' ? `Checking the throws with ${partner}’s phone…`
-                  : `${mine} word${mine === 1 ? '' : 's'}! Checking with ${partner}’s phone…`}
+                  : d.game === 'golf' ? `Round over: ${golfStrokes(mine)} strokes. Waiting for ${partner}…`
+                    : d.game === 'chope' ? `Food court full! Checking with ${partner}’s phone…`
+                      : d.game === 'sync' ? `${mine} beats together! Checking with ${partner}’s phone…`
+                        : `${mine} word${mine === 1 ? '' : 's'}! Checking with ${partner}’s phone…`}
             </p>
           )}
           {resultBlock}

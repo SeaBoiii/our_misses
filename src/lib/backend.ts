@@ -1,7 +1,8 @@
+import type { ChopeMoveRow, Stroke } from '../game/batch2'
 import type { Lineups } from '../game/lineup'
 import type { Zone } from '../game/more'
 import type {
-  AgakStatus, Duel, HthDay, HthStatus, MissEvent, Player, ProveStart, ProveStatus, ReasonCount, SendResult, SpsState, SpsThrow,
+  AgakStatus, DoodleDay, DoodleStatus, Duel, HthDay, HthStatus, MissEvent, Player, ProveStart, ProveStatus, ReasonCount, SendResult, SpsState, SpsThrow,
   Status, TotDay, TotStatus, VsGame, WeekTotal,
 } from '../game/rules'
 
@@ -19,6 +20,19 @@ export type Signal =
   | { type: 'cannot_guess'; card: number; text: string }
   | { type: 'cannot_got'; card: number }
   | { type: 'cannot_pass'; card: number }
+  | { type: 'doodle_drawn' }
+  /** Golf: how my round is going (strokes so far on the hole I'm on). */
+  | { type: 'golf'; hole: number; strokes: number; done: boolean }
+  /** Chope Wars: move `n` is in the database; fetch it. */
+  | { type: 'chope_moved'; n: number }
+  /** Draw & Guess: ink for stroke `id` of card `card` (new points only); `end` when the finger lifts. */
+  | { type: 'draw_ink'; card: number; id: number; c: number; w: number; p: number[]; end?: boolean }
+  | { type: 'draw_clear'; card: number }
+  | { type: 'draw_guess'; card: number; text: string }
+  | { type: 'draw_got'; card: number }
+  | { type: 'draw_pass'; card: number }
+  /** In Sync: I hit beat `beat`. */
+  | { type: 'sync_hit'; beat: number }
   | { type: 'duel_invite'; game: VsGame }
   | { type: 'duel_decline' }
   | { type: 'duel_cancel' }
@@ -61,6 +75,12 @@ export interface Backend {
   agakGuess(needle: number): Promise<AgakStatus>
   spsThrow(id: number, round: number, hand: SpsThrow): Promise<SpsState>
   spsGet(id: number): Promise<SpsState>
+  doodleToday(): Promise<DoodleStatus>
+  doodleSubmit(prompt: string, strokes: Stroke[]): Promise<DoodleStatus>
+  doodleAlbum(): Promise<DoodleDay[]>
+  /** Chope Wars: make move `n` (it must be your turn); returns every move so far. */
+  chopeMove(id: number, n: number, kind: 'place' | 'swap', stool: number): Promise<ChopeMoveRow[]>
+  chopeGet(id: number): Promise<ChopeMoveRow[]>
   proveToday(): Promise<ProveStatus>
   proveStart(level: number): Promise<ProveStart>
   proveFinish(score: number): Promise<ProveStatus>

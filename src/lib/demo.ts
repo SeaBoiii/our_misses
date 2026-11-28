@@ -4,6 +4,12 @@ import type { Backend, Change, Signal } from './backend'
 import {
   agakScore, cannotDeck, cannotMisses, CANNOT_SWAP_MS, demoHints, HTH_POINTS, hthOfDay, spsState, SPS_THROWS, TARGET_MAX, TARGET_MIN,
 } from '../game/batch1'
+import {
+  chopeMover, chopeReplay, chopeValue, CHOPE_STOOLS, DOODLE_POINTS, doodleOfDay, DRAW_SECOND_HALF, DRAW_SWAP_MS, drawDeck,
+  golfCourse, golfScore, strokesFit, syncMisses, syncSong, type ChopeMoveRow, type Stroke,
+} from '../game/batch2'
+import * as C from '../chope/engine.js'
+import * as G from '../golf/engine.js'
 import { proveTarget } from '../game/catch'
 import { AGAK_CARDS } from '../content/agak'
 import { lineupFor, nextDay } from '../game/lineup'
@@ -14,7 +20,7 @@ import {
 import {
   dayKey, DUEL_COUNTDOWN_MS, DUEL_POINTS, emptyWeek, HEART_CAP, heartsAt, partnerOf, PLAYERS, rallyFor,
   sameBrainPartner, spendHeart, VS_LENGTH_MS, vsScore, WEEK_MS, weekKey, weekStartMs, weekTotalsFrom,
-  type AgakRound, type Duel, type HthDay, type HthEntry, type MissEvent, type Player, type ProveDay, type ProveEntry,
+  type AgakRound, type DoodleDay, type DoodleEntry, type Duel, type HthDay, type HthEntry, type MissEvent, type Player, type ProveDay, type ProveEntry,
   type ReasonCount, type SendResult, type SpsThrow, type TotDay, type TotEntry, type VsGame, type WeekTotal,
 } from '../game/rules'
 
@@ -47,13 +53,16 @@ interface DemoSave {
   hth?: Record<string, Partial<Record<Player, HthRow>>>
   agak?: Record<string, AgakRow>
   sps?: Record<number, Record<Player, SpsThrow[]>>
+  doodle?: Record<string, Partial<Record<Player, { prompt: string; strokes: Stroke[] }>>>
+  chope?: Record<number, ChopeMoveRow[]>
 }
 const KEY = 'our_misses_demo_v1'
 // Test switches: ?samebrain makes the pretend partner always miss you at the same moment;
 // ?quiet keeps her from sending or playing anything on her own (she still answers VS games,
 // This or That and Hold hands, but plays them slowly); ?duelme / ?pourme / ?quizme / ?chaptehme
 // make her challenge you right away; ?handsme makes her ask to hold hands; ?fastbot makes her
-// solve a Pour-off in 12 seconds. ?kopime / ?spsme / ?cannotme challenge you to the batch 1 games.
+// solve a Pour-off in 12 seconds. ?kopime / ?spsme / ?cannotme challenge you to the batch 1 games,
+// and ?golfme / ?chopeme / ?drawme / ?syncme to the batch 2 ones.
 const params = new URLSearchParams(location.search)
 const QUIET = params.has('quiet')
 // ?allgames turns the daily rotation off; ?lineupday=YYYY-MM-DD plays as if it were that day.
@@ -107,12 +116,16 @@ export function demoBackend(me: Player): Backend {
   save.hth ??= {}
   save.agak ??= {}
   save.sps ??= {}
+  save.doodle ??= {}
+  save.chope ??= {}
   const prove = save.prove
   const duels = save.duels
   const tot = save.tot
   const hth = save.hth
   const agak = save.agak
   const sps = save.sps
+  const doodle = save.doodle
+  const chope = save.chope
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)) } catch { /* ignore */ } }
   let onEvent: ((e: MissEvent, change: Change) => void) | null = null
   let onPresence: ((here: Player[]) => void) | null = null
@@ -131,7 +144,7 @@ export function demoBackend(me: Player): Backend {
     return { hearts, next_at: nextAt === null ? null : new Date(nextAt).toISOString() }
   }
 
-  function record(player: Player, kind: 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally' | 'hth' | 'agak' | 'cannot', points: number, t: number) {
+  function record(player: Player, kind: 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally' | 'hth' | 'agak' | 'cannot' | 'doodle' | 'draw' | 'sync', points: number, t: number) {
     const e: MissEvent = { id: save.nextId++, player, kind, charge: null, rally_length: null, rally_bonus: 0, points, ref_id: null, created_at: new Date(t).toISOString(), reason: null }
     save.events.push(e)
     later(0, () => onEvent?.(e, 'insert'))
@@ -186,12 +199,16 @@ export function demoBackend(me: Player): Backend {
     // Scissors-Paper-Stone is scored from the throws, never from what a phone says.
     const a = d.game === 'sps' ? spsState(throws.Aleem, throws.Nurul).mine : d.aleem_score ?? 0
     const n = d.game === 'sps' ? spsState(throws.Nurul, throws.Aleem).mine : d.nurul_score ?? 0
-    if (d.game === 'cannot') {
-      const words = Math.min(a, n)
+    if (d.game === 'cannot' || d.game === 'draw' || d.game === 'sync') {
+      // Together: words (or every 4 beats) both phones agree on, 6 a game and 12 a day.
+      const together = Math.min(a, n)
+      const kind = d.game
       Object.assign(d, { aleem_score: a, nurul_score: n, winner: 'tie', points: 0, settled_at: t })
       for (const p of PLAYERS) {
-        const earned = cannotMisses(words, todayPoints(p, 'cannot', t))
-        if (earned > 0) record(p, 'cannot', earned, t)
+        const earned = kind === 'sync'
+          ? Math.max(0, Math.min(syncMisses(together), 12 - todayPoints(p, 'sync', t)))
+          : cannotMisses(together, todayPoints(p, kind, t))
+        if (earned > 0) record(p, kind, earned, t)
       }
       return
     }
@@ -275,7 +292,7 @@ export function demoBackend(me: Player): Backend {
   const scoreKey = (p: Player): 'aleem_score' | 'nurul_score' => (p === 'Aleem' ? 'aleem_score' : 'nurul_score')
 
   const lineupDay = () => LINEUP_DAY ?? dayKey(Date.now())
-  const onToday = (game: string) => ALL_GAMES || (['prove', 'tot', 'hth', 'agak'].includes(game) ? lineupFor(lineupDay()).daily === game : lineupFor(lineupDay()).play.includes(game as VsGame))
+  const onToday = (game: string) => ALL_GAMES || (['prove', 'tot', 'hth', 'agak', 'doodle'].includes(game) ? lineupFor(lineupDay()).daily === game : lineupFor(lineupDay()).play.includes(game as VsGame))
 
   function startDuel(by: Player, game: VsGame) {
     const t = Date.now()
@@ -343,6 +360,10 @@ export function demoBackend(me: Player): Backend {
       return
     }
     if (d.game === 'sps') return // she throws when you do (see spsThrow)
+    if (d.game === 'golf') { golfBot(d); return }
+    if (d.game === 'chope') { later(Math.max(0, d.starts_at - Date.now()) + 300, () => chopeBotMove(d)); return }
+    if (d.game === 'draw') { drawBot(d); return }
+    if (d.game === 'sync') { syncBot(d); return }
     if (d.game === 'cannot') { cannotBot(d); return }
     if (d.game === 'tug') {
       const rate = QUIET ? 3 : 5.5 + Math.random() * 3
@@ -446,6 +467,150 @@ export function demoBackend(me: Player): Backend {
         onSignal?.({ type: 'cannot_guess', card: s.card, text: deck[(s.card + 37) % deck.length].word })
       }
     })
+  }
+
+  // ---- Marina Mini Golf: she plays about par, a few seconds a stroke ------------------------
+  function golfBot(d: DuelRow) {
+    const course = golfCourse(d.seed)
+    const strokes = course.map((h) => Math.max(1, Math.min(G.capOf(h), h.par + (QUIET ? roll(1, 4) : roll(-1, 2)))))
+    let at = Math.max(0, d.starts_at - Date.now()) + 1_500
+    strokes.forEach((n, i) => {
+      at += n * (QUIET ? 1_500 : 3_500)
+      later(at, () => { if (d.settled_at === null) onSignal?.({ type: 'golf', hole: i + 1, strokes: n, done: i === course.length - 1 }) })
+    })
+    later(at + 400, () => { report(d, partner, golfScore(strokes, course), false, Date.now()); onSignal?.({ type: 'duel_done', id: d.id }) })
+  }
+
+  // ---- Chope Wars: she moves with the engine's own CPU when it's her turn ------------------
+  function chopeDone(d: DuelRow) {
+    const { s: board, seatOf } = chopeReplay(d.seed, chope[d.id] ?? [], d.started_by)
+    if (board.phase !== 'over') return
+    later(700, () => { report(d, partner, chopeValue(board, seatOf(partner)), false, Date.now()); onSignal?.({ type: 'duel_done', id: d.id }) })
+  }
+  function chopeBotMove(d: DuelRow) {
+    const moves = chope[d.id] ?? []
+    const n = moves.length + 1
+    if (d.settled_at !== null || chopeMover(n, d.started_by) !== partner) return
+    if (chopeReplay(d.seed, moves, d.started_by).s.phase !== 'play') return
+    later(QUIET ? 1_200 : 900 + Math.random() * 1_400, () => {
+      const now = chope[d.id] ?? []
+      if (now.length !== moves.length || d.settled_at !== null) return
+      const m = C.cpuMove(chopeReplay(d.seed, now, d.started_by).s, QUIET ? 'easy' : 'hard')
+      if (!m) return
+      chope[d.id] = [...now, { n, player: partner, kind: m.type, stool: m.stool }]
+      persist()
+      onSignal?.({ type: 'chope_moved', n })
+      chopeDone(d)
+    })
+  }
+
+  // ---- Draw & Guess: she scribbles when it's her turn and guesses yours -------------------
+  interface DrawBot { got: Set<number>; index: [number, number]; strokes: Map<number, number> }
+  const drawBots = new Map<number, DrawBot>()
+  const scribble = () => {
+    let [x, y] = [200 + Math.random() * 600, 200 + Math.random() * 600]
+    const p = [Math.round(x), Math.round(y)]
+    for (let i = 0; i < 10; i++) {
+      x = Math.min(980, Math.max(20, x + (Math.random() - 0.5) * 180))
+      y = Math.min(980, Math.max(20, y + (Math.random() - 0.5) * 180))
+      p.push(Math.round(x), Math.round(y))
+    }
+    return p
+  }
+  function drawBot(d: DuelRow) {
+    const st: DrawBot = { got: new Set(), index: [0, DRAW_SECOND_HALF], strokes: new Map() }
+    drawBots.set(d.id, st)
+    const end = d.starts_at + VS_LENGTH_MS.draw
+    const herHalf = d.started_by === me ? 0 : 1
+    const sketch = () => {
+      const t = Date.now()
+      const from = d.starts_at + herHalf * DRAW_SWAP_MS
+      if (d.settled_at !== null || t >= Math.min(end, from + DRAW_SWAP_MS)) return
+      if (t < from) { later(from - t + 1_000, sketch); return }
+      const card = st.index[herHalf]
+      const n = st.strokes.get(card) ?? 0
+      if (n < 4) {
+        st.strokes.set(card, n + 1)
+        onSignal?.({ type: 'draw_ink', card, id: n + 1, c: n % 4, w: 2, p: scribble(), end: true })
+      } else {
+        st.index[herHalf] = card + 1
+        onSignal?.({ type: 'draw_pass', card })
+      }
+      later(QUIET ? 4_000 : 2_500, sketch)
+    }
+    sketch()
+    later(Math.max(0, end - Date.now()) + 900, () => {
+      report(d, partner, st.got.size, false, Date.now())
+      onSignal?.({ type: 'duel_done', id: d.id })
+    })
+  }
+  function drawHeard(sig: Signal) {
+    const d = duels.find((x) => x.settled_at === null && x.game === 'draw')
+    const st = d && drawBots.get(d.id)
+    if (!d || !st || !('card' in sig)) return
+    const h = sig.card >= DRAW_SECOND_HALF ? 1 : 0
+    if (sig.type === 'draw_got' || sig.type === 'draw_pass') {
+      if (sig.type === 'draw_got') st.got.add(sig.card)
+      st.index[h] = Math.max(st.index[h], sig.card + 1)
+      return
+    }
+    if (sig.type !== 'draw_ink' || !sig.end) return
+    // You finished a stroke: she has a think, then gets it or has a go.
+    const n = (st.strokes.get(sig.card) ?? 0) + 1
+    st.strokes.set(sig.card, n)
+    const card = sig.card
+    later(1_500, () => {
+      if (d.settled_at !== null || st.index[h] !== card || st.strokes.get(card) !== n) return
+      const deck = drawDeck(d.seed)
+      if (Math.random() < (QUIET ? 0.25 : 0.2 + 0.15 * n)) {
+        st.got.add(card)
+        st.index[h] = card + 1
+        onSignal?.({ type: 'draw_got', card })
+      } else onSignal?.({ type: 'draw_guess', card, text: deck[(card + 37) % deck.length] })
+    })
+  }
+
+  // ---- In Sync: she hits most of the beats ----------------------------------------------
+  const syncBots = new Map<number, { hers: Set<number>; yours: Set<number> }>()
+  function syncBot(d: DuelRow) {
+    const st = { hers: new Set<number>(), yours: new Set<number>() }
+    syncBots.set(d.id, st)
+    syncSong(d.seed).forEach((ms, i) => {
+      if (Math.random() > (QUIET ? 0.75 : 0.85)) return
+      later(Math.max(0, d.starts_at + ms + (Math.random() - 0.5) * 120 - Date.now()), () => {
+        if (d.settled_at !== null) return
+        st.hers.add(i)
+        onSignal?.({ type: 'sync_hit', beat: i })
+      })
+    })
+    later(Math.max(0, d.starts_at + VS_LENGTH_MS.sync - Date.now()) + 900, () => {
+      report(d, partner, [...st.hers].filter((i) => st.yours.has(i)).length, false, Date.now())
+      onSignal?.({ type: 'duel_done', id: d.id })
+    })
+  }
+
+  // ---- Doodle Day: she draws you a heart -------------------------------------------------
+  const PRETEND_DOODLE: Stroke[] = [{
+    c: 1, w: 3,
+    p: Array.from({ length: 40 }, (_, i) => {
+      const a = (i / 39) * Math.PI * 2
+      return [Math.round(500 + 22 * 16 * Math.sin(a) ** 3), Math.round(470 - 22 * (13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)))]
+    }).flat(),
+  }]
+  function doodleDay(day: string): DoodleDay {
+    const rows = doodle[day] ?? {}
+    const revealed = Boolean(rows.Aleem && rows.Nurul)
+    const entry = (p: Player): DoodleEntry | null => {
+      const r = rows[p]
+      if (!r) return null
+      if (p !== me && !revealed) return { drawn: true }
+      return { prompt: r.prompt, strokes: r.strokes }
+    }
+    return { day, revealed, Aleem: entry('Aleem'), Nurul: entry('Nurul') }
+  }
+  const doodleStatus = () => {
+    const t = Date.now()
+    return { now: new Date(t).toISOString(), day: dayKey(t), today: doodleDay(dayKey(t)) }
   }
 
   // ---- Scissors-Paper-Stone ---------------------------------------------------------
@@ -754,6 +919,56 @@ export function demoBackend(me: Player): Backend {
       }
       return spsState(st[me], st[partner])
     },
+    async doodleToday() {
+      await pause(60)
+      return doodleStatus()
+    },
+    async doodleSubmit(prompt, strokes) {
+      await pause()
+      const t = Date.now()
+      const day = dayKey(t)
+      if (!strokesFit(strokes)) throw new Error('draw something (but not too much)')
+      if (!onToday('doodle')) throw new Error('Doodle Day is not on today')
+      if (doodle[day]?.[me]) throw new Error('already drew today')
+      doodle[day] = { ...doodle[day], [me]: { prompt, strokes } }
+      persist()
+      const settle = (at: number) => { if (doodle[day]?.Aleem && doodle[day]?.Nurul) for (const p of PLAYERS) record(p, 'doodle', DOODLE_POINTS, at) }
+      if (!doodle[day]?.[partner]) {
+        later(QUIET ? 4_000 : 2_000, () => {
+          if (doodle[day]?.[partner]) return
+          doodle[day] = { ...doodle[day], [partner]: { prompt: doodleOfDay(day).id, strokes: PRETEND_DOODLE } }
+          settle(Date.now())
+          persist()
+          onSignal?.({ type: 'doodle_drawn' })
+        })
+      } else settle(t)
+      return doodleStatus()
+    },
+    async doodleAlbum() {
+      await pause(60)
+      return Object.keys(doodle).filter((d) => doodle[d]?.Aleem && doodle[d]?.Nurul).sort().reverse().map(doodleDay)
+    },
+    async chopeMove(id, n, kind, stool) {
+      await pause(80)
+      const t = Date.now()
+      const d = duels.find((x) => x.id === id && x.game === 'chope')
+      if (!d || d.settled_at !== null || t < d.starts_at || t > d.starts_at + VS_LENGTH_MS.chope) throw new Error('no game to move in')
+      const moves = chope[d.id] ?? []
+      if (n !== moves.length + 1 || chopeMover(n, d.started_by) !== me) throw new Error('not your turn')
+      if (moves.filter((m) => m.kind === 'place').length >= CHOPE_STOOLS) throw new Error('the game is over')
+      const owner = [...moves].reverse().find((m) => m.stool === stool)?.player
+      if (kind === 'place' && owner) throw new Error('that stool is choped')
+      if (kind === 'swap' && (!owner || owner === me || moves.some((m) => m.player === me && m.kind === 'swap'))) throw new Error('the auntie can’t swap that')
+      chope[d.id] = [...moves, { n, player: me, kind, stool }]
+      persist()
+      chopeBotMove(d)
+      chopeDone(d)
+      return [...chope[d.id]]
+    },
+    async chopeGet(id) {
+      await pause(60)
+      return [...(chope[id] ?? [])]
+    },
     async spsGet(id) {
       await pause(60)
       const d = duels.find((x) => x.id === id && x.game === 'sps')
@@ -803,6 +1018,12 @@ export function demoBackend(me: Player): Backend {
         if ((d.game === 'quiz' || d.game === 'mrt') && t < d.starts_at + 7_000) throw new Error('the quiz is not over yet')
         if (d.game === 'pour' && solved && t < d.starts_at + 8_000) throw new Error('too fast to be true')
         if (d.game === 'kopi' && t < d.starts_at + 55_000) throw new Error('the shift is not over yet')
+        if (d.game === 'golf' && t < d.starts_at + 6_000) throw new Error('the round is not over yet')
+        if (d.game === 'draw' && t < d.starts_at + 85_000) throw new Error('the round is not over yet')
+        if (d.game === 'sync' && t < d.starts_at + 24_000) throw new Error('the song is not over yet')
+        if (d.game === 'chope' && t < d.starts_at + VS_LENGTH_MS.chope && (chope[d.id] ?? []).filter((m) => m.kind === 'place').length < CHOPE_STOOLS) {
+          throw new Error('the game is not over yet')
+        }
         if (d.game === 'cannot' && t < d.starts_at + 85_000) throw new Error('the round is not over yet')
         if (d.game === 'sps' && t < d.starts_at + VS_LENGTH_MS.sps) {
           const st = spsOf(d)
@@ -841,6 +1062,11 @@ export function demoBackend(me: Player): Backend {
       }
       if (s.type === 'chapteh_kick') partnerKicksBack(s.kicks, s.ms)
       if (s.type === 'cannot_clue' || s.type === 'cannot_got' || s.type === 'cannot_pass') cannotHeard(s)
+      if (s.type === 'draw_ink' || s.type === 'draw_got' || s.type === 'draw_pass') drawHeard(s)
+      if (s.type === 'sync_hit') {
+        const d = duels.find((x) => x.settled_at === null && x.game === 'sync')
+        if (d) syncBots.get(d.id)?.yours.add(s.beat)
+      }
       if (s.type === 'chapteh_drop') {
         const d = duels.find((x) => x.settled_at === null && x.game === 'chapteh')
         if (d) later(500, () => { report(d, partner, s.kicks, false, Date.now()); onSignal?.({ type: 'duel_done', id: d.id }) })
@@ -874,6 +1100,9 @@ export function demoBackend(me: Player): Backend {
       if (params.has('kopime')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'kopi' }))
       if (params.has('spsme')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'sps' }))
       if (params.has('cannotme')) later(2_500, () => onSignal?.({ type: 'duel_invite', game: 'cannot' }))
+      for (const game of ['golf', 'chope', 'draw', 'sync'] as const) {
+        if (params.has(game + 'me')) later(2_500, () => onSignal?.({ type: 'duel_invite', game }))
+      }
       if (params.has('handsme')) later(2_500, () => { handsOpen = true; onSignal?.({ type: 'hands', state: 'open' }) })
       wanderLoop()
       return () => {

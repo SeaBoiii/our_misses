@@ -669,3 +669,62 @@ input[type='range'] { padding: 0; border: none; background: none; accent-color: 
 .cannot-form { display: flex; gap: 8px; }
 .cannot-form input { flex: 1; min-width: 0; }
 .cannot-warn { color: var(--heart); font-weight: 700; animation: shake 0.08s linear 4; }
+
+/* Sketches: Doodle Day and Draw & Guess */
+.sketch { width: 100%; aspect-ratio: 1; display: block; border: 2.5px solid var(--line); border-radius: 18px; background: #fffdf8; }
+.sketch-paper { fill: #fffdf8; }
+.sketch.draw { touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.sketch.draw.off { opacity: 0.85; cursor: default; }
+.small-sketch { max-width: 220px; margin: 0 auto; }
+.drawpad { display: flex; flex-direction: column; gap: 8px; }
+.drawpad-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ink { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); padding: 0; }
+.ink.on { outline: 3px solid var(--heart); outline-offset: 2px; }
+.ink-size { width: 36px; height: 30px; border: 2px solid var(--line); border-radius: 10px; background: var(--paper); display: grid; place-items: center; padding: 0; }
+.ink-size i { display: block; border-radius: 50%; background: var(--ink); }
+.doodle-head { display: flex; justify-content: space-between; align-items: center; }
+.hurry { color: var(--heart); }
+.doodle-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.doodle-pair figure { margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.doodle-pair figcaption { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.draw-word { font-size: 18px; text-align: center; }
+.draw-word b { font-size: 22px; color: var(--heart); }
+
+/* Marina Mini Golf */
+.golf { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.golf-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.golf-stage { position: relative; }
+.golf-board { width: 100%; display: block; border: 2.5px solid var(--line); border-radius: 16px; touch-action: none; user-select: none; -webkit-user-select: none; background: #4DAE5B; }
+.golf-banner { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--gold); border: 2.5px solid var(--line); border-radius: 14px; padding: 8px 14px; text-align: center; animation: pop 0.4s cubic-bezier(.3, 1.6, .5, 1); white-space: nowrap; }
+.golf-banner b { display: block; font-size: 20px; }
+
+/* Chope Wars */
+.chope { display: flex; flex-direction: column; gap: 8px; }
+.chope-turn { font-weight: 700; min-height: 1.4em; }
+.chope-board { width: 100%; max-width: 380px; margin: 0 auto; display: block; touch-action: manipulation; }
+.chope-table { fill: #f3e3c3; stroke: var(--line); stroke-width: 2.5; transition: fill 0.3s; }
+.chope-table.fan { fill: #d9eefc; }
+.chope-table.famous { fill: #fff0b3; }
+.chope-label { font-size: 22px; font-weight: 800; fill: #2a1a1f; pointer-events: none; }
+.chope-stool { cursor: default; }
+.chope-stool.can { cursor: pointer; }
+.chope-hit { fill: transparent; }
+.chope-seat { fill: var(--paper); stroke: var(--line); stroke-width: 2.5; transition: fill 0.2s; }
+.chope-stool.can .chope-seat { stroke: var(--heart); stroke-width: 3.5; }
+.chope-seat.last { stroke: var(--gold); stroke-width: 5; }
+.chope-pack { font-size: 15px; pointer-events: none; }
+.chope-tools { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+
+/* In Sync */
+.sync { display: flex; flex-direction: column; gap: 10px; }
+.sync-lane { position: relative; border: 2.5px solid var(--line); border-radius: 18px; background: linear-gradient(var(--paper), var(--heart-tint)); overflow: hidden; }
+.sync-line { position: absolute; left: 0; right: 0; height: 4px; background: var(--ink); opacity: 0.7; }
+.sync-note { position: absolute; left: 50%; width: 38px; height: 38px; margin: -19px 0 0 -19px; border-radius: 50%; border: 2.5px solid var(--line); background: var(--paper); display: grid; place-items: center; font-size: 18px; }
+.sync-note.mine { background: var(--nurul); }
+.sync-note.theirs { box-shadow: 0 0 0 5px var(--aleem); }
+.sync-note.mine.theirs { background: var(--paper); }
+.sync-note.missed { opacity: 0.35; }
+.sync-flash { position: absolute; right: 12px; bottom: 12px; font-weight: 800; animation: pop 0.3s ease-out; }
+.sync-flash.ok { color: var(--good); }
+.sync-flash.off { color: var(--ink-soft); }
+.sync-pad { height: 120px; font-size: 36px; }

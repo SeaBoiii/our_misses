@@ -19,6 +19,7 @@ async function mockProject(page: Page, opts: { member?: boolean; hearts?: number
   let mine: Record<string, unknown> | null = null
   let hthMine: { question: string; answer: string } | null = null
   let agakNeedle: number | null = null
+  let doodleMine: { prompt: string; strokes: unknown } | null = null
   let hearts = opts.hearts ?? 3
   const now = () => new Date().toISOString()
   const heartsOf = () => ({ hearts, next_at: hearts < 3 ? new Date(Date.now() + 1_800_000).toISOString() : null })
@@ -77,6 +78,15 @@ async function mockProject(page: Page, opts: { member?: boolean; hearts?: number
       proveCalls.push({ fn: 'hth', body })
       hthMine = { question: body.p_question, answer: body.p_answer.trim() }
       return json(route, hthDay())
+    }
+    const doodleDay = () => ({ now: now(), day: today, today: { day: today, revealed: false, Aleem: doodleMine, Nurul: null } })
+    if (path === '/rest/v1/rpc/our_misses_doodle_today') return json(route, doodleDay())
+    if (path === '/rest/v1/rpc/our_misses_doodle_album') return json(route, [])
+    if (path === '/rest/v1/rpc/our_misses_doodle_submit') {
+      const body = route.request().postDataJSON()
+      proveCalls.push({ fn: 'doodle', body })
+      doodleMine = { prompt: body.p_prompt, strokes: body.p_strokes }
+      return json(route, doodleDay())
     }
     const agakRound = () => ({
       day: today, psychic: 'Nurul', card: 'agak-1', clue: 'char kway teow at midnight', needle: agakNeedle,
@@ -265,4 +275,29 @@ test('Heart to Heart and Agak Agak go through their RPCs', async ({ page }) => {
   await page.getByTestId('agak-lock').click()
   await expect(page.getByTestId('agak-reveal')).toContainText('So close!')
   expect(mock.proveCalls.find((c) => c.fn === 'agak')?.body).toEqual({ p_needle: 47.5 })
+})
+
+test('Doodle Day sends its strokes as JSON', async ({ page }) => {
+  const mock = await mockProject(page, {
+    lineup: {
+      today: { day: '2026-11-29', daily: 'doodle', play: ['mrt', 'sps', 'pour', 'chapteh'] },
+      tomorrow: { day: '2026-11-30', daily: 'tot', play: ['kopi', 'quiz', 'chope', 'sync'] },
+    },
+  })
+  await signIn(page)
+  await expect(page.getByTestId('teaser')).toHaveText('Tomorrow: 🤔 This or That · ☕ 🧠 🧻 🥁')
+  await page.getByTestId('open-doodle').click()
+  await page.getByTestId('doodle-start').click()
+  const box = (await page.getByTestId('drawpad').boundingBox())!
+  await page.mouse.move(box.x + 40, box.y + 40)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width - 40, box.y + box.height - 40, { steps: 8 })
+  await page.mouse.up()
+  await page.getByTestId('doodle-send').click()
+  await expect(page.getByTestId('doodle-waiting')).toContainText('hasn’t drawn yet')
+  const body = mock.proveCalls.find((c) => c.fn === 'doodle')?.body as { p_prompt: string; p_strokes: { c: number; w: number; p: number[] }[] }
+  expect(body.p_prompt).toMatch(/^doodle-\d\d$/)
+  expect(body.p_strokes).toHaveLength(1)
+  expect(body.p_strokes[0].p.length).toBeGreaterThanOrEqual(4)
+  expect(body.p_strokes[0].p.every((v) => Number.isInteger(v) && v >= 0 && v <= 1000)).toBe(true)
 })

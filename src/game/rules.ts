@@ -8,7 +8,7 @@ export const partnerOf = (p: Player): Player => (p === 'Aleem' ? 'Nurul' : 'Alee
 export interface MissEvent {
   id: number
   player: Player
-  kind: 'miss' | 'same_brain' | 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally' | 'hth' | 'agak' | 'cannot'
+  kind: 'miss' | 'same_brain' | 'prove_it' | 'duel' | 'hands' | 'tot' | 'rally' | 'hth' | 'agak' | 'cannot' | 'doodle' | 'draw' | 'sync'
   charge: number | null
   rally_length: number | null
   rally_bonus: number
@@ -45,6 +45,12 @@ export interface WeekTotal {
   hth: number
   agak: number
   cannot: number
+  /** Misses from Doodle Day, Draw & Guess and In Sync (both of you). */
+  doodle: number
+  draw: number
+  sync: number
+  /** Fewest strokes either of you took over a golf round that week (0 = none). */
+  best_golf: number
 }
 
 /** This or That: the partner's answer is hidden (only `answered`) until you have both answered. */
@@ -73,6 +79,11 @@ export type SpsThrow = 'scissors' | 'paper' | 'stone'
 export interface SpsRound { round: number; mine: SpsThrow; theirs: SpsThrow; winner: 'me' | 'them' | 'tie' }
 export interface SpsState { rounds: SpsRound[]; waiting: boolean; next: number; mine: number; theirs: number; over: boolean }
 
+/** Doodle Day: the partner's doodle is hidden (only `drawn`) until you have both drawn. */
+export interface DoodleEntry { drawn?: boolean; prompt?: string; strokes?: { c: number; w: number; p: number[] }[] }
+export interface DoodleDay { day: string; revealed: boolean; Aleem: DoodleEntry | null; Nurul: DoodleEntry | null }
+export interface DoodleStatus { now: string; day: string; today: DoodleDay }
+
 export interface ReasonCount { player: Player; reason: number; n: number }
 
 /** One player's Prove It for a day. The partner's claim is hidden (only `finished`) until the reveal. */
@@ -84,9 +95,10 @@ export interface ProveStart { level: number; target: number; started_at: string 
  * VS games. tug: 15 s of tapping. pour: a water sort race on one shared puzzle.
  * quiz / mrt: the same 7 questions (SG trivia / the MRT network). chapteh: together, one shared rally.
  * kopi: the same orders for 60 s, most drinks right wins. sps: best of 5, scored from the throws.
- * cannot: together, describe words without the banned ones.
+ * cannot: together, describe words without the banned ones. golf: 3 holes, fewest strokes.
+ * chope: Chope Wars, turn by turn. draw: together, draw and guess. sync: together, tap the rhythm.
  */
-export type VsGame = 'tug' | 'pour' | 'quiz' | 'chapteh' | 'mrt' | 'kopi' | 'sps' | 'cannot'
+export type VsGame = 'tug' | 'pour' | 'quiz' | 'chapteh' | 'mrt' | 'kopi' | 'sps' | 'cannot' | 'golf' | 'chope' | 'draw' | 'sync'
 export interface Duel {
   id: number
   game: VsGame
@@ -104,10 +116,11 @@ export interface Duel {
 export const DUEL_COUNTDOWN_MS = 4_000
 export const VS_LENGTH_MS: Record<VsGame, number> = {
   tug: 15_000, pour: 180_000, quiz: 110_000, chapteh: 300_000, mrt: 110_000, kopi: 60_000, sps: 120_000, cannot: 90_000,
+  golf: 180_000, chope: 300_000, draw: 90_000, sync: 30_000,
 }
 export const isQuizGame = (g: VsGame) => g === 'quiz' || g === 'mrt'
 /** Together games: nobody wins; both of you earn what you both agree on. */
-export const isTogether = (g: VsGame) => g === 'chapteh' || g === 'cannot'
+export const isTogether = (g: VsGame) => g === 'chapteh' || g === 'cannot' || g === 'draw' || g === 'sync'
 export const DUEL_POINTS = 5
 export const SOLVED_BASE = 1_000_000
 /** Mirrors the database: how a finished VS game is scored. */
@@ -116,7 +129,10 @@ export function vsScore(game: VsGame, value: number, solved: boolean, elapsedMs:
   if (game === 'quiz' || game === 'mrt') return Math.min(1540, Math.max(0, value))
   if (game === 'chapteh') return Math.min(500, Math.max(0, value))
   if (game === 'kopi') return Math.min(40, Math.max(0, value))
-  if (game === 'cannot') return Math.min(60, Math.max(0, value))
+  if (game === 'cannot' || game === 'draw') return Math.min(60, Math.max(0, value))
+  if (game === 'golf') return Math.min(37, Math.max(0, value))
+  if (game === 'chope') return Math.min(200, Math.max(0, value))
+  if (game === 'sync') return Math.min(24, Math.max(0, value))
   if (game === 'sps') return Math.min(9, Math.max(0, value))
   return solved ? SOLVED_BASE - Math.min(SOLVED_BASE - 1, Math.floor(elapsedMs)) : Math.min(20, Math.max(0, value))
 }
@@ -128,7 +144,10 @@ export function describeVsScore(game: VsGame, score: number | null) {
   if (game === 'chapteh') return `${score} kick${score === 1 ? '' : 's'}`
   if (game === 'kopi') return `${score} drink${score === 1 ? '' : 's'}`
   if (game === 'sps') return `${score} win${score === 1 ? '' : 's'}`
-  if (game === 'cannot') return `${score} word${score === 1 ? '' : 's'}`
+  if (game === 'cannot' || game === 'draw') return `${score} word${score === 1 ? '' : 's'}`
+  if (game === 'golf') return `${40 - score} strokes`
+  if (game === 'chope') return `${Math.floor(score / 10)} pts, ${score % 10} table${score % 10 === 1 ? '' : 's'}`
+  if (game === 'sync') return `${score} beat${score === 1 ? '' : 's'} together`
   if (score >= SOLVED_BASE / 2) {
     const ms = SOLVED_BASE - score
     const m = Math.floor(ms / 60_000)
@@ -141,7 +160,7 @@ export function describeVsScore(game: VsGame, score: number | null) {
 export const emptyWeek = (week_start: string): WeekTotal => ({
   week_start, aleem: 0, nurul: 0, aleem_misses: 0, nurul_misses: 0, same_brains: 0, longest_rally: 0,
   aleem_proven: 0, nurul_proven: 0, aleem_bluffs: 0, nurul_bluffs: 0, aleem_duels: 0, nurul_duels: 0,
-  hands: 0, tot: 0, best_chapteh: 0, hth: 0, agak: 0, cannot: 0,
+  hands: 0, tot: 0, best_chapteh: 0, hth: 0, agak: 0, cannot: 0, doodle: 0, draw: 0, sync: 0, best_golf: 0,
 })
 
 export const HEART_CAP = 3
@@ -307,6 +326,9 @@ export function weekTotalsFrom(events: readonly MissEvent[]): WeekTotal[] {
     else if (e.kind === 'hth') w.hth += e.points
     else if (e.kind === 'agak') w.agak += e.points
     else if (e.kind === 'cannot') w.cannot += e.points
+    else if (e.kind === 'doodle') w.doodle += e.points
+    else if (e.kind === 'draw') w.draw += e.points
+    else if (e.kind === 'sync') w.sync += e.points
     byWeek.set(k, w)
   }
   return [...byWeek.values()].sort((a, b) => b.week_start.localeCompare(a.week_start))
@@ -325,7 +347,7 @@ export function history(weeks: readonly WeekTotal[], currentWeek: string, liveWe
   const merged = weeks.filter((w) => w.week_start !== currentWeek)
   const stored = weeks.find((w) => w.week_start === currentWeek)
   // Bluffs and rally lengths aren't in the ledger, so the live week keeps the database's.
-  if (liveWeek) merged.push({ ...liveWeek, aleem_bluffs: stored?.aleem_bluffs ?? 0, nurul_bluffs: stored?.nurul_bluffs ?? 0, best_chapteh: stored?.best_chapteh ?? 0 })
+  if (liveWeek) merged.push({ ...liveWeek, aleem_bluffs: stored?.aleem_bluffs ?? 0, nurul_bluffs: stored?.nurul_bluffs ?? 0, best_chapteh: stored?.best_chapteh ?? 0, best_golf: stored?.best_golf ?? 0 })
   else if (stored) merged.push(stored)
   merged.sort((a, b) => b.week_start.localeCompare(a.week_start))
   const rows: HistoryRow[] = merged.map((w) => ({

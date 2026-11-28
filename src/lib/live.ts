@@ -1,9 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { Backend, Signal } from './backend'
+import type { ChopeMoveRow } from '../game/batch2'
 import type { Lineups } from '../game/lineup'
 import {
-  NoHeartsError, type AgakStatus, type Duel, type HthDay, type HthStatus, type MissEvent, type Player, type ProveStart,
+  NoHeartsError, type AgakStatus, type DoodleDay, type DoodleStatus, type Duel, type HthDay, type HthStatus, type MissEvent, type Player, type ProveStart,
   type ProveStatus, type ReasonCount, type SendResult, type SpsState, type Status, type TotDay, type TotStatus, type WeekTotal,
 } from '../game/rules'
 
@@ -78,6 +79,11 @@ export async function liveBackend(): Promise<Backend> {
     agakGuess: (needle) => call<AgakStatus>('our_misses_agak_guess', { p_needle: Math.round(needle * 100) / 100 }),
     spsThrow: (id, round, hand) => call<SpsState>('our_misses_sps_throw', { p_id: id, p_round: round, p_throw: hand }),
     spsGet: (id) => call<SpsState>('our_misses_sps_get', { p_id: id }),
+    doodleToday: () => call<DoodleStatus>('our_misses_doodle_today'),
+    doodleSubmit: (prompt, strokes) => call<DoodleStatus>('our_misses_doodle_submit', { p_prompt: prompt, p_strokes: strokes }),
+    doodleAlbum: () => call<DoodleDay[]>('our_misses_doodle_album', { p_limit: 30 }),
+    chopeMove: (id, n, kind, stool) => call<ChopeMoveRow[]>('our_misses_chope_move', { p_id: id, p_n: n, p_kind: kind, p_stool: stool }),
+    chopeGet: (id) => call<ChopeMoveRow[]>('our_misses_chope_get', { p_id: id }),
     proveToday: () => call<ProveStatus>('our_misses_prove_today'),
     proveStart: (level) => call<ProveStart>('our_misses_prove_start', { p_level: level }),
     proveFinish: (score) => call<ProveStatus>('our_misses_prove_finish', { p_score: score }),

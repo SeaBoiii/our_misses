@@ -102,6 +102,10 @@ export function History({ data, me, reasons = [], onBack }: { data: HistoryData;
                   {r.hth > 0 && <li>💬 Heart to Heart +{r.hth}</li>}
                   {r.agak > 0 && <li>🎯 Agak Agak +{r.agak}</li>}
                   {r.cannot > 0 && <li>🙊 Cannot Say! +{r.cannot}</li>}
+                  {r.doodle > 0 && <li>✏️ Doodle Day +{r.doodle}</li>}
+                  {r.draw > 0 && <li>🎨 Draw &amp; Guess +{r.draw}</li>}
+                  {r.sync > 0 && <li>🥁 In Sync +{r.sync}</li>}
+                  {r.best_golf > 0 && <li>⛳ best round {r.best_golf} strokes</li>}
                 </ul>
               </li>
             )

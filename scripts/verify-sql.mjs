@@ -111,30 +111,37 @@ try {
 
   // ---- The daily lineup: only today's games can be started ---------------------------
   const lineup = (await db.query('select public.our_misses_lineup() as r')).rows[0].r
-  assert.deepEqual(lineup.today, { day: '2026-11-22', daily: 'agak', play: ['quiz', 'tug', 'pour', 'cannot'] })
-  assert.deepEqual(lineup.tomorrow, { day: '2026-11-23', daily: 'prove', play: ['sps', 'quiz', 'pour', 'chapteh'] })
-  await fails('select public.our_misses_prove_start(3)', [], 'P0001') // an Agak Agak day
-  await fails("select public.our_misses_hth_answer('know-01', 'you')", [], 'P0001')
+  assert.deepEqual(lineup.today, { day: '2026-11-22', daily: 'hth', play: ['sps', 'quiz', 'chope', 'cannot'] })
+  assert.deepEqual(lineup.tomorrow, { day: '2026-11-23', daily: 'agak', play: ['tug', 'kopi', 'mrt', 'sync'] })
+  await fails('select public.our_misses_prove_start(3)', [], 'P0001') // a Heart to Heart day
+  await fails(`select public.our_misses_doodle_submit('doodle-01', '[{"c":0,"w":2,"p":[1,2]}]')`, [], 'P0001')
   await fails("select public.our_misses_duel_start('mrt')", [], 'P0001') // not in today's four
-  await at(T0 + 15 * 60_000) // Monday 00:05: a Prove It day now
-  await fails("select public.our_misses_tot_answer('tot-1', 0, 0)", [], 'P0001')
-  await fails("select public.our_misses_duel_start('kopi')", [], 'P0001')
   assert.equal((await db.query('select public.our_misses_agak_today() as r')).rows[0].r.today, null, 'No round is dealt on other days.')
-  // 28 days: one daily game, three versus games and one together game each day; never
-  // yesterday's daily game or versus three; every daily game 7 times, every play game 14.
+  await at(T0 + 15 * 60_000) // Monday 00:05: an Agak Agak day now
+  await fails("select public.our_misses_tot_answer('tot-1', 0, 0)", [], 'P0001')
+  await fails("select public.our_misses_duel_start('golf')", [], 'P0001')
+  // 40 days: one daily game, three versus games and one together game each day; never
+  // yesterday's daily or together game, and at most one of yesterday's versus games.
   await as(null)
-  const cycle = (await db.query("select our_misses_private.lineup(date '2026-11-22' + n) as l from generate_series(0, 28) n")).rows.map((r) => r.l)
+  const N = 40
+  const TOGETHER = ['chapteh', 'cannot', 'draw', 'sync']
+  const cycle = (await db.query(`select our_misses_private.lineup(date '2026-11-22' + n) as l from generate_series(0, ${N}) n`)).rows.map((r) => r.l)
   const seen = {}
-  for (let i = 0; i < 28; i++) {
-    const [today, before] = [cycle[i], cycle[(i + 27) % 28]]
-    assert.notDeepEqual(today.play.slice(0, 3).sort(), before.play.slice(0, 3).sort())
+  for (let i = 0; i < N; i++) {
+    const [today, before] = [cycle[i], cycle[(i + N - 1) % N]]
+    assert.ok(today.play.slice(0, 3).filter((g) => before.play.includes(g)).length <= 1)
     assert.notEqual(today.daily, before.daily)
+    assert.notEqual(today.play[3], before.play[3])
     assert.equal(new Set(today.play).size, 4)
-    assert.ok(['chapteh', 'cannot'].includes(today.play[3]) && today.play.slice(0, 3).every((g) => !['chapteh', 'cannot'].includes(g)))
+    assert.ok(TOGETHER.includes(today.play[3]) && today.play.slice(0, 3).every((g) => !TOGETHER.includes(g)))
     for (const g of [today.daily, ...today.play]) seen[g] = (seen[g] ?? 0) + 1
   }
-  assert.deepEqual(seen, { prove: 7, tot: 7, hth: 7, agak: 7, tug: 14, pour: 14, quiz: 14, mrt: 14, kopi: 14, sps: 14, chapteh: 14, cannot: 14 })
-  assert.deepEqual({ ...cycle[28], day: 0 }, { ...cycle[0], day: 0 }, 'The cycle repeats every 28 days.')
+  assert.deepEqual(seen, {
+    prove: 8, tot: 8, hth: 8, agak: 8, doodle: 8,
+    tug: 15, pour: 15, quiz: 15, mrt: 15, kopi: 15, sps: 15, golf: 15, chope: 15,
+    chapteh: 10, cannot: 10, draw: 10, sync: 10,
+  })
+  assert.deepEqual({ ...cycle[N], day: 0 }, { ...cycle[0], day: 0 }, 'The cycle repeats every 40 days.')
   await as('anon')
   await fails('select public.our_misses_lineup()')
   await as('authenticated', ALEEM)
@@ -395,7 +402,7 @@ try {
     week_start: '2026-11-23', aleem: 13 + 4 + 5 + 5, nurul: 7 + 1 + 3,
     aleem_misses: 3, nurul_misses: 2, same_brains: 1, longest_rally: 4,
     aleem_proven: 1, nurul_proven: 2, aleem_bluffs: 1, nurul_bluffs: 1, aleem_duels: 2, nurul_duels: 0,
-    hands: 0, tot: 0, best_chapteh: 0, hth: 0, agak: 0, cannot: 0,
+    hands: 0, tot: 0, best_chapteh: 0, hth: 0, agak: 0, cannot: 0, doodle: 0, draw: 0, sync: 0, best_golf: 0,
   })
   checks++
 
@@ -494,7 +501,7 @@ try {
     aleem: 27 + 2 + 1 + 5 + 2 + 5 + 12, nurul: 11 + 3 + 2 + 12,
     aleem_misses: 5, nurul_misses: 2, same_brains: 1, longest_rally: 4,
     aleem_proven: 1, nurul_proven: 2, aleem_bluffs: 1, nurul_bluffs: 1, aleem_duels: 3, nurul_duels: 0,
-    hands: 8, tot: 4, best_chapteh: 40, hth: 0, agak: 0, cannot: 0,
+    hands: 8, tot: 4, best_chapteh: 40, hth: 0, agak: 0, cannot: 0, doodle: 0, draw: 0, sync: 0, best_golf: 0,
   })
   checks++
 
@@ -621,6 +628,101 @@ try {
   )
   checks++
 
+  // ---- Batch 2: Doodle Day ------------------------------------------------------------------
+  const T10 = T9 + 60 * 60_000 // Sunday 13:00
+  const scribble = JSON.stringify([{ c: 0, w: 2, p: [100, 120, 180, 220, 260, 240] }, { c: 1, w: 1, p: [500, 500, 520, 530] }])
+  await as('authenticated', ALEEM)
+  await at(T10)
+  assert.deepEqual((await rpc('our_misses_doodle_today')).today, { day: '2026-11-29', revealed: false, Aleem: null, Nurul: null })
+  const myDoodle = await rpc('our_misses_doodle_submit', 'doodle-03', scribble)
+  assert.deepEqual([myDoodle.today.Aleem.prompt, myDoodle.today.Aleem.strokes.length, myDoodle.today.Nurul], ['doodle-03', 2, null])
+  await fails('select public.our_misses_doodle_submit($1, $2)', ['doodle-03', scribble], 'P0001') // once a day
+  await as('authenticated', NURUL)
+  await fails('select public.our_misses_doodle_submit($1, $2)', ['doodle-03', '{}'], '22023')
+  await fails('select public.our_misses_doodle_submit($1, $2)', ['doodle-03', '[]'], '22023')
+  await fails('select public.our_misses_doodle_submit($1, $2)', ['doodle-03', JSON.stringify([{ c: 0, w: 1, p: Array(30_000).fill(500) }])], '22023') // too big
+  assert.deepEqual((await rpc('our_misses_doodle_today')).today.Aleem, { drawn: true }, 'Hidden until you both draw.')
+  const bothDoodles = await rpc('our_misses_doodle_submit', 'doodle-03', scribble)
+  assert.equal(bothDoodles.today.revealed, true)
+  assert.equal(bothDoodles.today.Aleem.strokes[0].p.length, 6)
+  assert.deepEqual((await eventsOf('doodle')).map((e) => [e.player, e.points]), [['Aleem', 2], ['Nurul', 2]])
+  assert.deepEqual((await rpc('our_misses_doodle_album', 5)).map((d) => d.day), ['2026-11-29'])
+  checks += 10
+
+  // ---- Batch 2: Marina Mini Golf (versus) ---------------------------------------------------
+  await as('authenticated', ALEEM)
+  await at(T10 + 5 * 60_000)
+  const golf = await rpc('our_misses_duel_start', 'golf')
+  await at(T10 + 5 * 60_000 + 4_000 + 3_000)
+  await fails('select public.our_misses_duel_finish($1, 30, false)', [golf.id], '22023') // 3 seconds in
+  await at(T10 + 5 * 60_000 + 4_000 + 60_000)
+  await rpc('our_misses_duel_finish', golf.id, 31, false) // 9 strokes
+  await as('authenticated', NURUL)
+  const golfDone = await rpc('our_misses_duel_finish', golf.id, 50, false)
+  assert.deepEqual([golfDone.game, golfDone.nurul_score, golfDone.winner, golfDone.points], ['golf', 37, 'Nurul', 0], 'Capped at 3 holes in one; Sunday’s +5 is gone.')
+  checks += 2
+
+  // ---- Batch 2: Chope Wars (versus, turn by turn) -------------------------------------------
+  await as('authenticated', ALEEM)
+  await at(T10 + 10 * 60_000)
+  const chope = await rpc('our_misses_duel_start', 'chope') // Aleem accepted, so Nurul moves first
+  const moveAs = async (who, n, kind, stool) => { await as('authenticated', who); return rpc('our_misses_chope_move', chope.id, n, kind, stool) }
+  await as('authenticated', NURUL)
+  await fails("select public.our_misses_chope_move($1, 1, 'place', 0)", [chope.id], 'P0001') // before the start
+  await at(T10 + 10 * 60_000 + 5_000)
+  await as('authenticated', ALEEM)
+  await fails("select public.our_misses_chope_move($1, 1, 'place', 0)", [chope.id], 'P0001') // not Aleem's turn
+  assert.equal((await moveAs(NURUL, 1, 'place', 0)).length, 1)
+  await fails("select public.our_misses_chope_move($1, 2, 'place', 3)", [chope.id], 'P0001') // Nurul again
+  await as('authenticated', ALEEM)
+  await fails("select public.our_misses_chope_move($1, 2, 'place', 0)", [chope.id], 'P0001') // already choped
+  await fails("select public.our_misses_chope_move($1, 2, 'place', 24)", [chope.id], '22023')
+  await fails("select public.our_misses_chope_move($1, 2, 'swap', 5)", [chope.id], 'P0001') // nothing to swap there
+  await moveAs(ALEEM, 2, 'place', 1)
+  await moveAs(NURUL, 3, 'swap', 1) // the cleaner auntie
+  await moveAs(ALEEM, 4, 'swap', 0)
+  await as('authenticated', NURUL)
+  await fails("select public.our_misses_chope_move($1, 5, 'swap', 0)", [chope.id], 'P0001') // one auntie a game
+  await fails('select public.our_misses_duel_finish($1, 80, false)', [chope.id], '22023') // stools left
+  for (let stool = 2, n = 5; stool < 24; stool++, n++) await moveAs(n % 2 ? NURUL : ALEEM, n, 'place', stool)
+  await as('authenticated', ALEEM)
+  await fails("select public.our_misses_chope_move($1, 27, 'place', 2)", [chope.id], 'P0001')
+  const moves = await rpc('our_misses_chope_get', chope.id)
+  assert.deepEqual([moves.length, moves[2], moves[25].stool], [26, { n: 3, player: 'Nurul', kind: 'swap', stool: 1 }, 23])
+  await rpc('our_misses_duel_finish', chope.id, 70, false)
+  await as('authenticated', NURUL)
+  const chopeDone = await rpc('our_misses_duel_finish', chope.id, 55, false)
+  assert.deepEqual([chopeDone.winner, chopeDone.aleem_score], ['Aleem', 70])
+  checks += 11
+
+  // ---- Batch 2: Draw & Guess and In Sync (together) -----------------------------------------
+  const together = async (game, aleemSays, nurulSays, offsetMin, lasts) => {
+    await as('authenticated', ALEEM)
+    await at(T10 + offsetMin * 60_000)
+    const g = await rpc('our_misses_duel_start', game)
+    await at(T10 + offsetMin * 60_000 + 4_000 + lasts)
+    await rpc('our_misses_duel_finish', g.id, aleemSays, false)
+    await as('authenticated', NURUL)
+    return rpc('our_misses_duel_finish', g.id, nurulSays, false)
+  }
+  await as('authenticated', ALEEM)
+  await at(T10 + 20 * 60_000)
+  const earlySync = await rpc('our_misses_duel_start', 'sync')
+  await at(T10 + 20 * 60_000 + 4_000 + 10_000)
+  await fails('select public.our_misses_duel_finish($1, 9, false)', [earlySync.id], '22023') // the song is still on
+  const drawn = await together('draw', 8, 5, 25, 87_000)
+  assert.deepEqual([drawn.game, drawn.winner], ['draw', 'tie'])
+  await together('sync', 10, 9, 30, 26_000)
+  await together('sync', 24, 30, 35, 26_000)
+  // Draw & Guess: 5 agreed words = 5 each. In Sync: 9 agreed beats = 2, then 24 = 6 (a round's max).
+  assert.deepEqual((await eventsOf('draw')).map((e) => [e.player, e.points]), [['Aleem', 5], ['Nurul', 5]])
+  assert.deepEqual((await eventsOf('sync')).map((e) => [e.player, e.points]), [['Aleem', 2], ['Nurul', 2], ['Aleem', 6], ['Nurul', 6]])
+  checks += 4
+
+  const board5 = (await db.query('select * from public.our_misses_weeks()')).rows[0]
+  assert.deepEqual([board5.doodle, board5.draw, board5.sync, board5.best_golf], [4, 10, 16, 3])
+  checks++
+
   // Claims and duels are only reachable through the functions.
   await fails('select * from our_misses_private.prove')
   await fails('select * from our_misses_private.duels')
@@ -638,6 +740,14 @@ try {
   for (const sql of batch1) await fails(sql)
   await as('authenticated', OUTSIDER)
   for (const sql of batch1) await fails(sql)
+  await as('anon')
+  for (const table of ['doodle', 'chope']) await fails(`select * from our_misses_private.${table}`)
+  const batch2 = ['select public.our_misses_doodle_today()', `select public.our_misses_doodle_submit('doodle-01', '[{"c":0}]')`, 'select public.our_misses_doodle_album(5)', "select public.our_misses_chope_move(1, 1, 'place', 0)", 'select public.our_misses_chope_get(1)']
+  for (const sql of batch2) await fails(sql)
+  await as('authenticated', OUTSIDER)
+  for (const sql of batch2) await fails(sql)
+  await as('authenticated', ALEEM)
+  for (const table of ['doodle', 'chope']) await fails(`select * from our_misses_private.${table}`)
 
   console.log(`SQL checks passed: ${checks}`)
 } finally {

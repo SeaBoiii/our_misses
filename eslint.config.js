@@ -13,6 +13,11 @@ export default [
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   {
+    // Engines copied from sg_games (src/golf, src/chope) stay plain JS with .d.ts files beside them.
+    files: ['src/**/*.js'],
+    rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }] },
+  },
+  {
     files: ['src/**/*.{ts,tsx}'],
     plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
     rules: {
